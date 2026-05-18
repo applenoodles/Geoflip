@@ -12,7 +12,11 @@
       "Bash(pip show *)",
       "Bash(python -m pytest tests/test_models.py tests/test_state.py -v)",
       "Bash(python -m pytest tests/test_models.py tests/test_state.py -q)",
-      "Bash(python -m pytest -q)"
+      "Bash(python -m pytest -q)",
+      "Bash(python -m pytest tests/test_rules.py -x --tb=short)",
+      "Bash(python -m pytest tests/test_rules.py::test_multi_anchor_partial_failure_uses_successful_route -x --tb=long)",
+      "Bash(python -m pytest tests/test_rules.py --tb=short)",
+      "Bash(python -m pytest --tb=short)"
     ]
   }
 }
