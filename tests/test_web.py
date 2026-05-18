@@ -157,6 +157,35 @@ def test_index_nominatim_error_flashes(client, deps):
     assert state.pois == []
 
 
+def test_index_search_result_reflects_real_owner_not_nominatim_owner(client, deps):
+    """Regression: a re-searched POI already owned by P2 must show as owned in the UI.
+
+    merge_discovered_pois() correctly preserves the stored owner, but the previous
+    template rendered the fresh Nominatim objects (owner=None) and showed a
+    flag button. The view must rebuild search_results from state.
+    """
+    # Pre-seed: P2 already owns "p1"
+    state = new_game()
+    state.pois = [_make_poi("p1", owner=2)]
+    deps["state_store"].save(state)
+
+    # Nominatim returns a fresh copy of p1 with owner=None (typical)
+    fresh_p1 = _make_poi("p1", owner=None)
+    deps["nominatim"].results = [fresh_p1]
+
+    resp = client.get("/?q=p1")
+    assert resp.status_code == 200
+    # Must surface the existing P2 ownership label
+    assert "Player 2".encode("utf-8") in resp.data
+    # Must NOT offer the "插旗" submit button for this owned POI
+    # (The disabled "不可插旗" button uses different text)
+    assert "不可插旗".encode("utf-8") in resp.data
+
+    # State sanity: owner unchanged
+    after = deps["state_store"].load()
+    assert after.get_poi("p1").owner == 2
+
+
 def test_index_query_does_not_advance_turn(client, deps):
     deps["nominatim"].results = [_make_poi("p1")]
     client.get("/?q=cafe")

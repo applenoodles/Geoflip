@@ -7,6 +7,7 @@ from typing import Any
 import httpx
 
 from app.models import Poi, score_poi
+from app.services.tls import build_ssl_context, is_certificate_verify_error
 
 
 class NominatimError(Exception):
@@ -158,6 +159,7 @@ class NominatimClient:
 
         self._cache: dict[str, list[Poi]] = {}
         self._last_request_time: float = 0.0
+        self._ssl_context = build_ssl_context()
 
     # ------------------------------------------------------------------
     # Private
@@ -231,17 +233,30 @@ class NominatimClient:
             params["bounded"] = 1
 
         try:
-            with httpx.Client(headers=self._headers, timeout=self._timeout) as client:
+            with httpx.Client(
+                headers=self._headers,
+                timeout=self._timeout,
+                verify=self._ssl_context,
+            ) as client:
                 resp = client.get(f"{self._base_url}/search", params=params)
                 resp.raise_for_status()
                 results: list[dict] = resp.json()
         except httpx.TimeoutException as exc:
             raise NominatimError("搜尋服務暫時無法使用，請稍後再試") from exc
         except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {403, 429}:
+                raise NominatimError(
+                    "Nominatim 拒絕請求，請在 .env 設定有效的 "
+                    "NOMINATIM_USER_AGENT 與 NOMINATIM_EMAIL"
+                ) from exc
             raise NominatimError(
                 f"Nominatim HTTP error {exc.response.status_code}"
             ) from exc
         except httpx.RequestError as exc:
+            if is_certificate_verify_error(exc):
+                raise NominatimError(
+                    "SSL 憑證驗證失敗，請更新 certifi/truststore 或確認系統根憑證"
+                ) from exc
             raise NominatimError(f"Nominatim request error: {exc}") from exc
         except (ValueError, KeyError) as exc:
             raise NominatimError(f"Nominatim response parse error: {exc}") from exc

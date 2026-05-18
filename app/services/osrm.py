@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 
 from app.models import RouteResult
+from app.services.tls import build_ssl_context, is_certificate_verify_error
 
 
 class OsrmError(Exception):
@@ -29,6 +30,7 @@ class OsrmClient:
         self._profile = profile
         self._timeout = timeout_seconds
         self._cache: dict[tuple[float, float, float, float, str], RouteResult] = {}
+        self._ssl_context = build_ssl_context()
 
     def route(
         self,
@@ -61,7 +63,7 @@ class OsrmClient:
         }
 
         try:
-            with httpx.Client(timeout=self._timeout) as client:
+            with httpx.Client(timeout=self._timeout, verify=self._ssl_context) as client:
                 resp = client.get(url, params=params)
                 resp.raise_for_status()
                 data: dict = resp.json()
@@ -72,6 +74,10 @@ class OsrmClient:
                 f"OSRM HTTP error {exc.response.status_code}"
             ) from exc
         except httpx.RequestError as exc:
+            if is_certificate_verify_error(exc):
+                raise OsrmError(
+                    "SSL 憑證驗證失敗，請更新 certifi/truststore 或確認系統根憑證"
+                ) from exc
             raise OsrmError(f"OSRM request error: {exc}") from exc
         except (ValueError, KeyError) as exc:
             raise OsrmError(f"OSRM response parse error: {exc}") from exc

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -16,24 +17,14 @@ from flask import (
 
 from app.config import Config
 from app.game.rules import RulesEngine
+from app.map.render import render_map_html
 from app.services.nominatim import NominatimClient, NominatimError
 from app.services.osrm import OsrmClient
 from app.state import StateStore
 
 load_dotenv()
 
-
-# ---------------------------------------------------------------------------
-# Stub /map placeholder (Phase 5 will replace via render_map_html)
-# ---------------------------------------------------------------------------
-
-_MAP_STUB_HTML = """<!doctype html>
-<html><head><meta charset="utf-8"><title>map</title></head>
-<body style="margin:0;padding:0;background:#eef;">
-  <p style="padding:1em;font-family:sans-serif;">
-    地圖將在 Phase 5 由 Folium 渲染。目前為 stub。
-  </p>
-</body></html>"""
+logger = logging.getLogger("geoflip.web")
 
 
 def create_app(
@@ -103,7 +94,9 @@ def create_app(
                     center_lon=config.DEFAULT_CENTER_LON,
                     search_km=5.0,
                 )
+                logger.info("search q=%r → %d results", q, len(results))
             except NominatimError as exc:
+                logger.warning("search q=%r failed: %s", q, exc)
                 flash(f"搜尋失敗：{exc}", "error")
                 results = []
 
@@ -112,7 +105,12 @@ def create_app(
             else:
                 state.merge_discovered_pois(results)
                 state_store.save(state)
-                search_results = results
+                # Rebuild from state so already-owned POIs reflect their REAL owner,
+                # not the owner=None on the freshly-fetched Nominatim objects.
+                search_results = [
+                    state.get_poi(p.id) for p in results
+                    if state.get_poi(p.id) is not None
+                ]
 
         current_player_id = state.current_player_id()
         anchor_count = len(state.anchor_pois(current_player_id))
@@ -154,11 +152,21 @@ def create_app(
         if result.ok:
             state_store.save(result.state)
             flipped_n = len(result.flipped_poi_ids)
+            logger.info(
+                "move ok turn=%d player=%d poi=%s trump=%s flipped=%d routes=%d",
+                state.turn_index, state.current_player_id(),
+                poi_id, use_trump, flipped_n, len(result.route_ids),
+            )
             if flipped_n:
                 flash(f"插旗成功，翻面 {flipped_n} 個 POI", "success")
             else:
                 flash("插旗成功", "success")
         else:
+            logger.info(
+                "move INVALID turn=%d player=%d poi=%s trump=%s reason=%s",
+                state.turn_index, state.current_player_id(),
+                poi_id, use_trump, result.message,
+            )
             flash(result.message, "error")
             # IMPORTANT: do NOT save — keep the on-disk state untouched.
 
@@ -172,8 +180,8 @@ def create_app(
 
     @app.get("/map")
     def map_view():
-        # Phase 5 will replace with render_map_html(state_store.load(), config)
-        return _MAP_STUB_HTML
+        state = state_store.load()
+        return render_map_html(state, config)
 
     @app.get("/api/state")
     def api_state():
@@ -183,6 +191,21 @@ def create_app(
     return app
 
 
+def _configure_root_logging() -> None:
+    """Idempotent root-logger setup for `python -m app.web` invocations."""
+    if logging.getLogger().handlers:
+        return
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    logging.basicConfig(
+        level=getattr(logging, level_name, logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+
+
 if __name__ == "__main__":
+    _configure_root_logging()
     app = create_app()
-    app.run(debug=True)
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "5000"))
+    debug = os.getenv("FLASK_DEBUG", "1") == "1"
+    app.run(host=host, port=port, debug=debug)

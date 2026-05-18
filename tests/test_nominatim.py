@@ -427,7 +427,7 @@ def test_timeout_raises_nominatim_error(mocker):
 
 def test_http_4xx_raises_nominatim_error(mocker):
     _setup_mock_http(mocker, [], status_code=429)
-    with pytest.raises(NominatimError, match="HTTP error"):
+    with pytest.raises(NominatimError, match="NOMINATIM_USER_AGENT"):
         _make_client().search("test")
 
 

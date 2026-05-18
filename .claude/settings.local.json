@@ -17,7 +17,9 @@
       "Bash(python -m pytest tests/test_rules.py::test_multi_anchor_partial_failure_uses_successful_route -x --tb=long)",
       "Bash(python -m pytest tests/test_rules.py --tb=short)",
       "Bash(python -m pytest --tb=short)",
-      "Bash(python -m pytest tests/test_web.py --tb=short)"
+      "Bash(python -m pytest tests/test_web.py --tb=short)",
+      "Bash(python -m pytest tests/test_integration.py --tb=short)",
+      "Bash(python -m pytest tests/test_map_render.py --tb=short)"
     ]
   }
 }

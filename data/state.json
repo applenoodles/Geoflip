@@ -1,0 +1,63 @@
+{
+  "game_id": "game_d9897e325af84d459f5604acb7b18d79",
+  "turn_index": 1,
+  "max_turns": 16,
+  "players": {
+    "1": {
+      "id": 1,
+      "name": "Player 1",
+      "trump_available": true
+    },
+    "2": {
+      "id": 2,
+      "name": "Player 2",
+      "trump_available": true
+    }
+  },
+  "pois": [
+    {
+      "id": "relation:1293250",
+      "name": "臺北市",
+      "lat": 25.0375198,
+      "lon": 121.5636796,
+      "osm_type": "relation",
+      "osm_id": 1293250,
+      "category": "",
+      "poi_type": "administrative",
+      "score": 1,
+      "owner": 1,
+      "discovered_turn": 0,
+      "placed_turn": 0,
+      "raw": {
+        "name": "臺北市",
+        "osm_type": "relation",
+        "type": "administrative",
+        "display_name": "臺北市, 臺灣",
+        "importance": 0.7098064222524881,
+        "osm_id": 1293250,
+        "address": {
+          "city": "臺北市",
+          "country_code": "tw"
+        },
+        "extratags": {
+          "wikidata": "Q1867",
+          "wikipedia": "zh:臺北市"
+        }
+      }
+    }
+  ],
+  "routes": [],
+  "moves": [
+    {
+      "turn_index": 0,
+      "player_id": 1,
+      "placed_poi_id": "relation:1293250",
+      "used_trump": false,
+      "route_ids": [],
+      "flipped_poi_ids": []
+    }
+  ],
+  "created_at": "2026-05-18T13:12:27.590949+00:00",
+  "updated_at": "2026-05-18T13:12:31.102222+00:00",
+  "status": "active"
+}
