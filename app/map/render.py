@@ -16,6 +16,11 @@ import folium
 
 from app.config import Config
 from app.models import GameState, Poi
+from app.services.geometry import (
+    build_meter_transformers,
+    buffer_route_meters,
+    route_to_meter_linestring,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +48,27 @@ def _owner_color(owner: int | None) -> str:
 # Popup builder — HTML escape every dynamic field to prevent XSS
 # ---------------------------------------------------------------------------
 
-def _build_popup_html(poi: Poi, state: GameState) -> str:
+def _build_popup_html(
+    poi: Poi,
+    state: GameState,
+    *,
+    current_pid: int,
+    trump_eligible: bool,
+    is_finished: bool,
+) -> str:
+    """Render a popup body for one POI.
+
+    Neutral POIs (owner=None) include an inline POST /move form with
+    target="_top" — the map runs inside an iframe and the form must
+    navigate the top frame so the player sees the redirected game page.
+
+    Owned POIs (flipped or anchor) never get an insert button.
+
+    The trump checkbox is rendered only when `trump_eligible` is True —
+    i.e. when the current player has at least one anchor AND their trump
+    is still available. The /move handler ignores the field if the player
+    can't actually use it, but hiding it here matches the S5 spec.
+    """
     owner_label = "中立" if poi.owner is None else f"Player {poi.owner}"
     is_anchor = False
     if poi.owner is not None:
@@ -56,6 +81,24 @@ def _build_popup_html(poi: Poi, state: GameState) -> str:
         f"<br>分數：{escape(str(poi.score))}",
         f"<br>擁有者：{escape(owner_label)}{escape(anchor_label)}",
     ]
+
+    if poi.owner is None and not is_finished:
+        trump_box = ""
+        if trump_eligible:
+            trump_box = (
+                '<label style="display:block;margin-top:4px;font-size:12px;">'
+                '<input type="checkbox" name="use_trump" value="on"> 使用王牌'
+                '</label>'
+            )
+        parts.append(
+            '<form method="post" action="/move" target="_top" '
+            'style="margin-top:8px;">'
+            f'<input type="hidden" name="poi_id" value="{escape(poi.id)}">'
+            f'{trump_box}'
+            f'<button type="submit">插旗為 Player {escape(str(current_pid))}</button>'
+            '</form>'
+        )
+
     return "".join(parts)
 
 
@@ -79,37 +122,17 @@ def render_map_html(state: GameState, config: Config) -> str:
         2: set(state.placed_flag_poi_ids(2)),
     }
 
-    # ---- markers ----
-    for poi in state.pois:
-        popup = folium.Popup(_build_popup_html(poi, state), max_width=320)
-        owner = poi.owner
-        has_flag = owner is not None and poi.id in placed_id_sets.get(owner, set())
+    # ---- popup form context ----
+    is_finished = state.is_finished()
+    current_pid = state.current_player_id()
+    trump_eligible = (
+        not is_finished
+        and state.has_anchor_flag(current_pid)
+        and state.players[current_pid].trump_available
+    )
 
-        if has_flag:
-            # Flag-bearing POI: use a Marker with pin icon in the player's color
-            folium.Marker(
-                location=[poi.lat, poi.lon],
-                popup=popup,
-                tooltip=escape(poi.name),
-                icon=folium.Icon(
-                    color=_PLAYER_FOLIUM_ICON_COLORS.get(owner, "gray"),
-                    icon="flag",
-                    prefix="fa",
-                ),
-            ).add_to(fmap)
-        else:
-            # Neutral or flipped: CircleMarker in owner color
-            folium.CircleMarker(
-                location=[poi.lat, poi.lon],
-                radius=7,
-                color=_owner_color(owner),
-                weight=2,
-                fill=True,
-                fill_color=_owner_color(owner),
-                fill_opacity=0.85,
-                popup=popup,
-                tooltip=escape(poi.name),
-            ).add_to(fmap)
+    # ---- buffers (z-bottom: drawn first so markers + routes stay clickable) ----
+    _render_route_buffers(fmap, state)
 
     # ---- routes ----
     for route in state.routes:
@@ -133,6 +156,43 @@ def render_map_html(state: GameState, config: Config) -> str:
                 f"buffer {int(route.buffer_m)}m"
             ),
         ).add_to(fmap)
+
+    # ---- markers (z-top: drawn last so they sit above buffers + routes) ----
+    for poi in state.pois:
+        popup_html = _build_popup_html(
+            poi,
+            state,
+            current_pid=current_pid,
+            trump_eligible=trump_eligible,
+            is_finished=is_finished,
+        )
+        popup = folium.Popup(popup_html, max_width=320)
+        owner = poi.owner
+        has_flag = owner is not None and poi.id in placed_id_sets.get(owner, set())
+
+        if has_flag:
+            folium.Marker(
+                location=[poi.lat, poi.lon],
+                popup=popup,
+                tooltip=escape(poi.name),
+                icon=folium.Icon(
+                    color=_PLAYER_FOLIUM_ICON_COLORS.get(owner, "gray"),
+                    icon="flag",
+                    prefix="fa",
+                ),
+            ).add_to(fmap)
+        else:
+            folium.CircleMarker(
+                location=[poi.lat, poi.lon],
+                radius=7,
+                color=_owner_color(owner),
+                weight=2,
+                fill=True,
+                fill_color=_owner_color(owner),
+                fill_opacity=0.85,
+                popup=popup,
+                tooltip=escape(poi.name),
+            ).add_to(fmap)
 
     # ---- fit bounds if we have POIs ----
     if state.pois:
@@ -164,6 +224,71 @@ def render_map_html(state: GameState, config: Config) -> str:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _render_route_buffers(fmap: folium.Map, state: GameState) -> None:
+    """Draw a semi-transparent polygon for each past route buffer.
+
+    Buffers are drawn before routes and markers so the flag pins and
+    polylines stay clickable on top. Trump buffers (≥150m) use a dashed
+    outline; normal buffers (≤50m) use a solid outline.
+    """
+    if not state.routes:
+        return
+
+    ref_pair: list[float] | None = None
+    for route in state.routes:
+        if route.coordinates_lonlat:
+            ref_pair = route.coordinates_lonlat[0]
+            break
+    if ref_pair is None:
+        return
+
+    ref_lon, ref_lat = float(ref_pair[0]), float(ref_pair[1])
+    to_meters, to_wgs84 = build_meter_transformers(ref_lon, ref_lat)
+
+    for route in state.routes:
+        if len(route.coordinates_lonlat) < 2 or route.buffer_m <= 0:
+            continue
+        try:
+            line_m = route_to_meter_linestring(route.coordinates_lonlat, to_meters)
+            buf = buffer_route_meters(line_m, route.buffer_m)
+        except ValueError:
+            continue
+
+        if buf.is_empty:
+            continue
+
+        if buf.geom_type == "Polygon":
+            polys = [buf]
+        elif buf.geom_type == "MultiPolygon":
+            polys = list(buf.geoms)
+        else:
+            continue
+
+        is_trump = route.buffer_m >= 150
+        color = _PLAYER_COLORS.get(route.player_id, _NEUTRAL_COLOR)
+
+        for poly in polys:
+            latlon: list[list[float]] = []
+            for x, y in poly.exterior.coords:
+                lon, lat = to_wgs84.transform(x, y)
+                latlon.append([lat, lon])
+            if len(latlon) < 3:
+                continue
+            folium.Polygon(
+                locations=latlon,
+                color=color,
+                weight=2,
+                opacity=0.6,
+                fill=True,
+                fill_color=color,
+                fill_opacity=0.15,
+                dash_array="6,4" if is_trump else None,
+                tooltip=(
+                    f"Player {route.player_id} buffer · {int(route.buffer_m)}m"
+                ),
+            ).add_to(fmap)
+
 
 def _compute_center(state: GameState, config: Config) -> tuple[float, float]:
     if state.pois:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -12,6 +13,33 @@ from app.services.tls import build_ssl_context, is_certificate_verify_error
 
 class NominatimError(Exception):
     """Raised when a Nominatim API call fails for any reason."""
+
+
+# ---------------------------------------------------------------------------
+# Setup-flow data class
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LocationCandidate:
+    """A starting-location choice surfaced during board setup.
+
+    Distinct from `Poi` because the setup flow is purely about picking a
+    *center* — administrative areas / districts / stations are all valid
+    starting points and must not be filtered like in-game POIs are.
+    """
+    display_name: str
+    lat: float
+    lon: float
+    osm_type: str | None = None
+    osm_id: int | None = None
+    category: str = ""
+    poi_type: str = ""
+
+    @property
+    def short_label(self) -> str:
+        if self.category and self.poi_type:
+            return f"{self.category}:{self.poi_type}"
+        return self.category or self.poi_type or ""
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +154,46 @@ def _normalize(result: dict) -> Poi | None:
     )
 
 
+def _normalize_location(result: dict) -> LocationCandidate | None:
+    """Convert one Nominatim result dict into a LocationCandidate.
+
+    Unlike `_normalize`, this does not filter administrative boundaries —
+    cities, districts, and neighbourhoods are valid starting points.
+    """
+    lat_raw = result.get("lat")
+    lon_raw = result.get("lon")
+    if not lat_raw or not lon_raw:
+        return None
+    try:
+        lat = float(lat_raw)
+        lon = float(lon_raw)
+    except (ValueError, TypeError):
+        return None
+
+    osm_type = result.get("osm_type")
+    osm_id_raw = result.get("osm_id")
+    try:
+        osm_id: int | None = int(osm_id_raw) if osm_id_raw is not None else None
+    except (TypeError, ValueError):
+        osm_id = None
+
+    display_name = (
+        result.get("display_name")
+        or result.get("name")
+        or "Unknown"
+    )
+
+    return LocationCandidate(
+        display_name=display_name,
+        lat=lat,
+        lon=lon,
+        osm_type=osm_type,
+        osm_id=osm_id,
+        category=result.get("class", "") or "",
+        poi_type=result.get("type", "") or "",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -158,6 +226,7 @@ class NominatimClient:
         self._min_interval = min_interval_seconds
 
         self._cache: dict[str, list[Poi]] = {}
+        self._location_cache: dict[str, list[LocationCandidate]] = {}
         self._last_request_time: float = 0.0
         self._ssl_context = build_ssl_context()
 
@@ -276,3 +345,80 @@ class NominatimClient:
 
         self._cache[key] = pois
         return pois
+
+    # ------------------------------------------------------------------
+
+    def search_locations(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> list[LocationCandidate]:
+        """
+        Search Nominatim for *starting-location* candidates (board setup).
+
+        Returns up to `limit` `LocationCandidate`s — deduplicated by
+        (osm_type, osm_id) with display_name as fallback.
+        Raises `NominatimError` on any network / parse failure.
+        """
+        key = f"loc|{query}|{limit}"
+        if key in self._location_cache:
+            return self._location_cache[key]
+
+        self._rate_limit()
+
+        params: dict[str, Any] = {
+            "format": "jsonv2",
+            "q": query,
+            "limit": limit,
+            "dedupe": 1,
+            "email": self._email,
+        }
+
+        try:
+            with httpx.Client(
+                headers=self._headers,
+                timeout=self._timeout,
+                verify=self._ssl_context,
+            ) as client:
+                resp = client.get(f"{self._base_url}/search", params=params)
+                resp.raise_for_status()
+                results: list[dict] = resp.json()
+        except httpx.TimeoutException as exc:
+            raise NominatimError("搜尋服務暫時無法使用，請稍後再試") from exc
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {403, 429}:
+                raise NominatimError(
+                    "Nominatim 拒絕請求，請在 .env 設定有效的 "
+                    "NOMINATIM_USER_AGENT 與 NOMINATIM_EMAIL"
+                ) from exc
+            raise NominatimError(
+                f"Nominatim HTTP error {exc.response.status_code}"
+            ) from exc
+        except httpx.RequestError as exc:
+            if is_certificate_verify_error(exc):
+                raise NominatimError(
+                    "SSL 憑證驗證失敗，請更新 certifi/truststore 或確認系統根憑證"
+                ) from exc
+            raise NominatimError(f"Nominatim request error: {exc}") from exc
+        except (ValueError, KeyError) as exc:
+            raise NominatimError(f"Nominatim response parse error: {exc}") from exc
+
+        self._record_request_time()
+
+        candidates: list[LocationCandidate] = []
+        seen: set[tuple] = set()
+        for result in results:
+            candidate = _normalize_location(result)
+            if candidate is None:
+                continue
+            if candidate.osm_type and candidate.osm_id is not None:
+                dedup_key: tuple = (candidate.osm_type, candidate.osm_id)
+            else:
+                dedup_key = (None, candidate.display_name)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            candidates.append(candidate)
+
+        self._location_cache[key] = candidates
+        return candidates

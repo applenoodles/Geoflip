@@ -5,7 +5,14 @@ import pytest
 import httpx
 from unittest.mock import MagicMock
 
-from app.services.nominatim import NominatimClient, NominatimError, _build_raw, _normalize
+from app.services.nominatim import (
+    LocationCandidate,
+    NominatimClient,
+    NominatimError,
+    _build_raw,
+    _normalize,
+    _normalize_location,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -468,3 +475,96 @@ def test_no_viewbox_without_center(mocker):
 
     params = mock_inst.get.call_args[1]["params"]
     assert "viewbox" not in params
+
+
+# ---------------------------------------------------------------------------
+# LocationCandidate / search_locations (setup flow)
+# ---------------------------------------------------------------------------
+
+def _loc_result(**overrides) -> dict:
+    base: dict = {
+        "osm_type": "node",
+        "osm_id": 555,
+        "lat": "24.8019",
+        "lon": "120.9716",
+        "class": "railway",
+        "type": "station",
+        "display_name": "新竹車站, 新竹市, 台灣",
+        "name": "新竹車站",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_normalize_location_returns_candidate():
+    c = _normalize_location(_loc_result())
+    assert isinstance(c, LocationCandidate)
+    assert c.display_name == "新竹車站, 新竹市, 台灣"
+    assert c.lat == pytest.approx(24.8019)
+    assert c.lon == pytest.approx(120.9716)
+    assert c.osm_type == "node"
+    assert c.osm_id == 555
+    assert c.category == "railway"
+    assert c.poi_type == "station"
+
+
+def test_normalize_location_keeps_administrative_boundary():
+    """Admin boundaries are valid starting locations and must NOT be filtered."""
+    c = _normalize_location(_loc_result(**{"class": "boundary", "type": "administrative"}))
+    assert c is not None
+    assert c.category == "boundary"
+    assert c.poi_type == "administrative"
+
+
+def test_normalize_location_missing_coords_returns_none():
+    r = _loc_result()
+    del r["lat"]
+    assert _normalize_location(r) is None
+
+
+def test_location_candidate_short_label():
+    c = LocationCandidate(
+        display_name="X", lat=0, lon=0, category="railway", poi_type="station",
+    )
+    assert c.short_label == "railway:station"
+
+
+def test_search_locations_returns_candidates(mocker):
+    _setup_mock_http(mocker, [_loc_result()])
+    candidates = _make_client().search_locations("新竹車站")
+    assert len(candidates) == 1
+    assert candidates[0].display_name.startswith("新竹車站")
+
+
+def test_search_locations_deduplicates_by_osm_id(mocker):
+    r1 = _loc_result(osm_type="node", osm_id=1, display_name="A")
+    r2 = _loc_result(osm_type="node", osm_id=1, display_name="Duplicate")
+    _setup_mock_http(mocker, [r1, r2])
+    candidates = _make_client().search_locations("test")
+    assert len(candidates) == 1
+    assert candidates[0].display_name == "A"
+
+
+def test_search_locations_caches(mocker):
+    inst = _setup_mock_http(mocker, [_loc_result()])
+    client = _make_client()
+    a = client.search_locations("test")
+    b = client.search_locations("test")
+    assert inst.get.call_count == 1
+    assert a is b
+
+
+def test_search_locations_timeout_raises(mocker):
+    mock_class = mocker.patch("httpx.Client")
+    inst = mock_class.return_value
+    inst.__enter__.return_value = inst
+    inst.__exit__.return_value = False
+    inst.get.side_effect = httpx.ReadTimeout("t", request=MagicMock())
+    with pytest.raises(NominatimError, match="暫時無法使用"):
+        _make_client().search_locations("test")
+
+
+def test_search_locations_http_error_raises(mocker):
+    _setup_mock_http(mocker, [], status_code=503)
+    with pytest.raises(NominatimError, match="HTTP error"):
+        _make_client().search_locations("test")
