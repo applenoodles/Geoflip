@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <title>GeoFlip — 開始新棋盤</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="setup">
+    <h1>GeoFlip</h1>
+    <p class="setup-intro">
+      選擇本局的起始地點。系統會以此為中心抓取附近的 POI 組成棋盤，
+      接著兩位玩家輪流插旗。
+    </p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul class="flashes">
+          {% for cat, msg in messages %}
+            <li class="flash {{ cat }}">{{ msg }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+
+    <form method="post" action="{{ url_for('setup_search') }}" class="setup-search">
+      <label>搜尋起始地點（例如：新竹車站、台大、士林夜市）：
+        <input type="text" name="q" value="{{ setup_query|default('') }}" required>
+      </label>
+      <button type="submit">搜尋</button>
+    </form>
+
+    {% if info_message %}
+      <p class="info">{{ info_message }}</p>
+    {% endif %}
+
+    {% if setup_candidates %}
+      <section class="setup-candidates">
+        <h2>選擇起始地點</h2>
+        <ul>
+          {% for c in setup_candidates %}
+            <li class="cand">
+              <div class="cand-name">{{ c.display_name }}</div>
+              <div class="cand-meta">
+                {{ c.short_label }}
+                · ({{ "%.4f"|format(c.lat) }}, {{ "%.4f"|format(c.lon) }})
+              </div>
+              <form method="post" action="{{ url_for('setup_start') }}">
+                <input type="hidden" name="lat" value="{{ c.lat }}">
+                <input type="hidden" name="lon" value="{{ c.lon }}">
+                <input type="hidden" name="display_name" value="{{ c.display_name }}">
+                <input type="hidden" name="radius_m" value="{{ default_radius_m }}">
+                <button type="submit">以此地點開始</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
+  </div>
+</body>
+</html>

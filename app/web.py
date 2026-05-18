@@ -20,6 +20,7 @@ from app.game.rules import RulesEngine
 from app.map.render import render_map_html
 from app.services.nominatim import NominatimClient, NominatimError
 from app.services.osrm import OsrmClient
+from app.services.overpass import OverpassClient, OverpassError
 from app.state import StateStore
 
 load_dotenv()
@@ -32,6 +33,7 @@ def create_app(
     state_store: StateStore | None = None,
     nominatim_client: NominatimClient | None = None,
     osrm_client: OsrmClient | None = None,
+    overpass_client: OverpassClient | None = None,
     rules_engine: RulesEngine | None = None,
 ) -> Flask:
     """Flask app factory.
@@ -57,6 +59,11 @@ def create_app(
             profile=config.OSRM_PROFILE,
             timeout_seconds=config.REQUEST_TIMEOUT_SECONDS,
         )
+    if overpass_client is None:
+        overpass_client = OverpassClient(
+            base_url=config.OVERPASS_BASE_URL,
+            timeout_seconds=config.OVERPASS_TIMEOUT_SECONDS,
+        )
     if rules_engine is None:
         rules_engine = RulesEngine()
 
@@ -68,6 +75,7 @@ def create_app(
     app.config["GEOFLIP_STATE_STORE"] = state_store
     app.config["GEOFLIP_NOMINATIM"] = nominatim_client
     app.config["GEOFLIP_OSRM"] = osrm_client
+    app.config["GEOFLIP_OVERPASS"] = overpass_client
     app.config["GEOFLIP_RULES"] = rules_engine
 
     # ------------------------------------------------------------------
@@ -78,10 +86,28 @@ def create_app(
     def health():
         return jsonify({"ok": True})
 
+    def _render_setup(
+        setup_query: str = "",
+        setup_candidates=None,
+        info_message: str | None = None,
+    ):
+        return render_template(
+            "setup.html",
+            setup_query=setup_query,
+            setup_candidates=setup_candidates or [],
+            info_message=info_message,
+            default_radius_m=config.OVERPASS_RADIUS_M,
+        )
+
     @app.get("/")
     def index():
         state = state_store.load()
         q = (request.args.get("q") or "").strip()
+
+        # Setup mode: board hasn't been built yet and the player isn't
+        # mid-search. /new-game lands here too after wiping state.
+        if not state.pois and not q:
+            return _render_setup()
 
         search_results = []
         info_message: str | None = None
@@ -176,6 +202,86 @@ def create_app(
     def new_game_route():
         state_store.reset()
         flash("新遊戲開始", "success")
+        # state is now empty → GET / will render the setup screen.
+        return redirect(url_for("index"))
+
+    @app.post("/setup/search")
+    def setup_search():
+        query = (request.form.get("q") or "").strip()
+        if not query:
+            flash("請輸入起始地點關鍵字", "error")
+            return _render_setup()
+
+        try:
+            candidates = nominatim_client.search_locations(query, limit=5)
+            logger.info("setup search q=%r → %d candidates", query, len(candidates))
+        except NominatimError as exc:
+            logger.warning("setup search q=%r failed: %s", query, exc)
+            flash(f"搜尋失敗：{exc}", "error")
+            return _render_setup(setup_query=query)
+
+        info_message = None
+        if not candidates:
+            info_message = "找不到符合的地點，請換關鍵字或換城市名稱"
+
+        return _render_setup(
+            setup_query=query,
+            setup_candidates=candidates,
+            info_message=info_message,
+        )
+
+    @app.post("/setup/start")
+    def setup_start():
+        try:
+            lat = float(request.form.get("lat", ""))
+            lon = float(request.form.get("lon", ""))
+        except (TypeError, ValueError):
+            flash("起始地點座標格式錯誤", "error")
+            return redirect(url_for("index"))
+
+        display_name = (request.form.get("display_name") or "").strip()
+
+        radius_raw = (request.form.get("radius_m") or "").strip()
+        try:
+            radius_m = float(radius_raw) if radius_raw else config.OVERPASS_RADIUS_M
+        except ValueError:
+            radius_m = config.OVERPASS_RADIUS_M
+
+        try:
+            pois = overpass_client.fetch_board_pois(
+                lat, lon, radius_m, limit=config.OVERPASS_MAX_POIS,
+            )
+        except OverpassError as exc:
+            logger.warning("overpass fetch failed at (%s,%s): %s", lat, lon, exc)
+            flash(f"地圖資料載入失敗：{exc}", "error")
+            return redirect(url_for("index"))
+
+        if len(pois) < config.OVERPASS_MIN_POIS:
+            logger.info(
+                "overpass too few POIs at (%s,%s) r=%sm → %d",
+                lat, lon, radius_m, len(pois),
+            )
+            flash(
+                f"附近可用 POI 太少（{len(pois)} 個，至少需要 "
+                f"{config.OVERPASS_MIN_POIS} 個），請換地點或調整範圍",
+                "error",
+            )
+            return redirect(url_for("index"))
+
+        # Commit: wipe any previous game and build a fresh board.
+        state_store.reset()
+        state = state_store.load()  # new_game()
+        state.merge_discovered_pois(pois)
+        state_store.save(state)
+
+        logger.info(
+            "setup start ok center=(%s,%s) r=%sm pois=%d label=%r",
+            lat, lon, radius_m, len(pois), display_name,
+        )
+        if display_name:
+            flash(f"已建立棋盤：{display_name}（{len(pois)} 個 POI）", "success")
+        else:
+            flash(f"已建立棋盤（{len(pois)} 個 POI）", "success")
         return redirect(url_for("index"))
 
     @app.get("/map")

@@ -7,7 +7,8 @@ import pytest
 
 from app.config import Config
 from app.models import Poi, RouteResult
-from app.services.nominatim import NominatimError
+from app.services.nominatim import LocationCandidate, NominatimError
+from app.services.overpass import OverpassError
 from app.state import StateStore, new_game
 from app.web import create_app
 
@@ -22,6 +23,9 @@ class FakeNominatim:
     results: list[Poi] = field(default_factory=list)
     error: Exception | None = None
     calls: list[tuple] = field(default_factory=list)
+    locations: list[LocationCandidate] = field(default_factory=list)
+    location_error: Exception | None = None
+    location_calls: list[tuple] = field(default_factory=list)
 
     def search(
         self,
@@ -35,6 +39,36 @@ class FakeNominatim:
         if self.error is not None:
             raise self.error
         return list(self.results)
+
+    def search_locations(
+        self,
+        query: str,
+        limit: int = 5,
+    ) -> list[LocationCandidate]:
+        self.location_calls.append((query, limit))
+        if self.location_error is not None:
+            raise self.location_error
+        return list(self.locations)
+
+
+@dataclass
+class FakeOverpass:
+    """Returns canned board POIs. Raises OverpassError if `error` set."""
+    pois: list[Poi] = field(default_factory=list)
+    error: Exception | None = None
+    calls: list[tuple] = field(default_factory=list)
+
+    def fetch_board_pois(
+        self,
+        center_lat: float,
+        center_lon: float,
+        radius_m: float,
+        limit: int = 60,
+    ) -> list[Poi]:
+        self.calls.append((center_lat, center_lon, radius_m, limit))
+        if self.error is not None:
+            raise self.error
+        return list(self.pois)
 
 
 @dataclass
@@ -77,21 +111,28 @@ def deps(tmp_path):
     state_store = StateStore(tmp_path / "state.json")
     nominatim = FakeNominatim()
     osrm = FakeOsrm()
+    overpass = FakeOverpass()
+    config = Config()
+    # Setup tests tune these thresholds without juggling env vars.
+    config.OVERPASS_MIN_POIS = 2
+    config.OVERPASS_MAX_POIS = 36
     return {
         "state_store": state_store,
         "nominatim": nominatim,
         "osrm": osrm,
+        "overpass": overpass,
+        "config": config,
     }
 
 
 @pytest.fixture()
 def app(deps):
-    config = Config()
     app = create_app(
-        config=config,
+        config=deps["config"],
         state_store=deps["state_store"],
         nominatim_client=deps["nominatim"],
         osrm_client=deps["osrm"],
+        overpass_client=deps["overpass"],
     )
     app.config["TESTING"] = True
     return app
@@ -369,6 +410,227 @@ def test_can_use_trump_true_when_has_anchor(client, deps):
 # ---------------------------------------------------------------------------
 # DI defaults — create_app() with no args still works
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Setup flow — GET /
+# ---------------------------------------------------------------------------
+
+def test_index_empty_state_renders_setup_form(client, deps):
+    """Fresh game with no POIs and no query → setup screen, not game UI."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    # Setup form posts to /setup/search
+    assert b'action="/setup/search"' in resp.data
+    # And it is NOT the game iframe map
+    assert b'<iframe' not in resp.data
+
+
+def test_index_with_board_renders_game(client, deps):
+    """State with POIs → game UI (iframe map), not setup."""
+    state = new_game()
+    state.pois = [_make_poi("p1")]
+    deps["state_store"].save(state)
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert b'<iframe' in resp.data
+    assert b'action="/setup/search"' not in resp.data
+
+
+def test_index_setup_mode_does_not_call_nominatim(client, deps):
+    client.get("/")
+    assert deps["nominatim"].calls == []
+    assert deps["nominatim"].location_calls == []
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/search
+# ---------------------------------------------------------------------------
+
+def test_setup_search_calls_nominatim_search_locations(client, deps):
+    deps["nominatim"].locations = [
+        LocationCandidate(
+            display_name="新竹車站, 新竹市",
+            lat=24.8019,
+            lon=120.9716,
+            osm_type="node",
+            osm_id=42,
+            category="railway",
+            poi_type="station",
+        ),
+    ]
+    resp = client.post("/setup/search", data={"q": "新竹車站"})
+    assert resp.status_code == 200
+    assert deps["nominatim"].location_calls == [("新竹車站", 5)]
+    # Should NOT touch the in-game POI search.
+    assert deps["nominatim"].calls == []
+    # Candidate must be rendered with a "start with this location" form.
+    assert b'action="/setup/start"' in resp.data
+    assert "新竹車站".encode("utf-8") in resp.data
+
+
+def test_setup_search_empty_query_flashes_and_returns_setup(client, deps):
+    resp = client.post("/setup/search", data={"q": "   "})
+    # No redirect — re-render setup directly with the flash visible.
+    assert resp.status_code == 200
+    assert deps["nominatim"].location_calls == []
+    assert "請輸入起始地點關鍵字".encode("utf-8") in resp.data
+    assert b'action="/setup/search"' in resp.data
+
+
+def test_setup_search_no_results_renders_info_message(client, deps):
+    deps["nominatim"].locations = []
+    resp = client.post("/setup/search", data={"q": "asdfqwerty"})
+    assert resp.status_code == 200
+    assert "找不到符合的地點".encode("utf-8") in resp.data
+    # No candidate "start" form should appear.
+    assert b'action="/setup/start"' not in resp.data
+
+
+def test_setup_search_nominatim_error_flashes(client, deps):
+    deps["nominatim"].location_error = NominatimError("nominatim 503")
+    resp = client.post("/setup/search", data={"q": "anywhere"})
+    assert resp.status_code == 200
+    assert "搜尋失敗".encode("utf-8") in resp.data
+    # Form must still be re-rendered so the player can retry.
+    assert b'action="/setup/search"' in resp.data
+
+
+# ---------------------------------------------------------------------------
+# POST /setup/start
+# ---------------------------------------------------------------------------
+
+def _board_pois(n: int) -> list[Poi]:
+    return [
+        _make_poi(f"b{i}", lat=25.0 + i * 0.0001, lon=121.5 + i * 0.0001)
+        for i in range(n)
+    ]
+
+
+def test_setup_start_fetches_overpass_and_populates_state(client, deps):
+    deps["overpass"].pois = _board_pois(5)
+
+    resp = client.post(
+        "/setup/start",
+        data={
+            "lat": "24.8019",
+            "lon": "120.9716",
+            "display_name": "新竹車站",
+            "radius_m": "900",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+
+    assert len(deps["overpass"].calls) == 1
+    call = deps["overpass"].calls[0]
+    assert call[0] == 24.8019
+    assert call[1] == 120.9716
+    assert call[2] == 900.0
+    assert call[3] == deps["config"].OVERPASS_MAX_POIS
+
+    state = deps["state_store"].load()
+    assert len(state.pois) == 5
+    assert state.turn_index == 0
+    assert state.status == "active"
+
+
+def test_setup_start_default_radius_when_missing(client, deps):
+    deps["overpass"].pois = _board_pois(3)
+    client.post(
+        "/setup/start",
+        data={"lat": "24.8", "lon": "120.97", "display_name": "X"},
+    )
+    assert deps["overpass"].calls[0][2] == deps["config"].OVERPASS_RADIUS_M
+
+
+def test_setup_start_invalid_coords_flashes_and_does_not_call_overpass(client, deps):
+    resp = client.post(
+        "/setup/start",
+        data={"lat": "not-a-number", "lon": "abc"},
+    )
+    assert resp.status_code == 302
+    assert deps["overpass"].calls == []
+    state = deps["state_store"].load()
+    assert state.pois == []
+
+
+def test_setup_start_too_few_pois_keeps_state_empty(client, deps):
+    deps["config"].OVERPASS_MIN_POIS = 5
+    deps["overpass"].pois = _board_pois(2)  # < 5
+
+    resp = client.post(
+        "/setup/start",
+        data={"lat": "24.8", "lon": "120.97", "display_name": "X"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    state = deps["state_store"].load()
+    assert state.pois == []  # nothing saved
+
+
+def test_setup_start_overpass_error_flashes_and_keeps_state_empty(client, deps):
+    deps["overpass"].error = OverpassError("overpass down")
+    resp = client.post(
+        "/setup/start",
+        data={"lat": "24.8", "lon": "120.97", "display_name": "X"},
+    )
+    assert resp.status_code == 302
+    state = deps["state_store"].load()
+    assert state.pois == []
+
+
+def test_setup_start_resets_previous_state(client, deps):
+    """A successful setup must wipe a prior game before building the new board."""
+    prev = new_game()
+    prev.pois = [_make_poi("old1", owner=2)]
+    prev.turn_index = 7
+    deps["state_store"].save(prev)
+
+    deps["overpass"].pois = _board_pois(4)
+    client.post(
+        "/setup/start",
+        data={"lat": "24.8", "lon": "120.97", "display_name": "X"},
+    )
+
+    state = deps["state_store"].load()
+    # Old POI gone, fresh board in place, turn_index reset.
+    assert state.get_poi("old1") is None
+    assert len(state.pois) == 4
+    assert state.turn_index == 0
+    assert state.game_id != prev.game_id
+
+
+def test_setup_start_skipped_does_not_advance_anything(client, deps):
+    """Invalid setup_start must never mutate state."""
+    deps["overpass"].error = OverpassError("nope")
+    pre = deps["state_store"].load()
+    client.post(
+        "/setup/start",
+        data={"lat": "1.0", "lon": "2.0", "display_name": "x"},
+    )
+    post = deps["state_store"].load()
+    # Both fresh new_games — pois empty, turn 0.
+    assert pre.pois == []
+    assert post.pois == []
+    assert post.turn_index == 0
+
+
+# ---------------------------------------------------------------------------
+# /new-game returns to setup
+# ---------------------------------------------------------------------------
+
+def test_new_game_redirects_and_landing_page_is_setup(client, deps):
+    """After /new-game, the next GET / must render the setup screen."""
+    state = new_game()
+    state.pois = [_make_poi("p1", owner=1)]
+    deps["state_store"].save(state)
+
+    resp = client.post("/new-game", follow_redirects=True)
+    assert resp.status_code == 200
+    assert b'action="/setup/search"' in resp.data
+    assert b'<iframe' not in resp.data
+
 
 def test_create_app_no_args_works(tmp_path, monkeypatch):
     monkeypatch.setenv("STATE_FILE", str(tmp_path / "state.json"))
