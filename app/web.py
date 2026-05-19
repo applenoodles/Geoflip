@@ -102,48 +102,27 @@ def create_app(
     @app.get("/")
     def index():
         state = state_store.load()
-        q = (request.args.get("q") or "").strip()
 
-        # Setup mode: board hasn't been built yet and the player isn't
-        # mid-search. /new-game lands here too after wiping state.
-        if not state.pois and not q:
+        # Setup mode: board hasn't been built yet. /new-game lands here too
+        # after wiping state. Gameplay POI search is gone — players click
+        # neutral POIs on the map to place flags.
+        if not state.pois:
             return _render_setup()
-
-        search_results = []
-        info_message: str | None = None
-
-        if q:
-            try:
-                results = nominatim_client.search(
-                    q,
-                    center_lat=config.DEFAULT_CENTER_LAT,
-                    center_lon=config.DEFAULT_CENTER_LON,
-                    search_km=5.0,
-                )
-                logger.info("search q=%r → %d results", q, len(results))
-            except NominatimError as exc:
-                logger.warning("search q=%r failed: %s", q, exc)
-                flash(f"搜尋失敗：{exc}", "error")
-                results = []
-
-            if not results:
-                info_message = "沒有找到可用 POI，請換關鍵字或放大搜尋範圍"
-            else:
-                state.merge_discovered_pois(results)
-                state_store.save(state)
-                # Rebuild from state so already-owned POIs reflect their REAL owner,
-                # not the owner=None on the freshly-fetched Nominatim objects.
-                search_results = [
-                    state.get_poi(p.id) for p in results
-                    if state.get_poi(p.id) is not None
-                ]
 
         current_player_id = state.current_player_id()
         anchor_count = len(state.anchor_pois(current_player_id))
-        has_anchor = state.has_anchor_flag(current_player_id)
-        can_use_trump = (
-            state.players[current_player_id].trump_available and has_anchor
-        )
+
+        scores = state.scores()
+        owned_counts = {
+            1: len(state.owned_pois(1)),
+            2: len(state.owned_pois(2)),
+        }
+        total_flips = sum(len(m.flipped_poi_ids) for m in state.moves)
+        total_routes = len(state.routes)
+        trump_used = {
+            1: any(m.used_trump for m in state.moves if m.player_id == 1),
+            2: any(m.used_trump for m in state.moves if m.player_id == 2),
+        }
 
         map_iframe_src = f"/map?v={state.turn_index}_{len(state.moves)}"
 
@@ -151,15 +130,15 @@ def create_app(
             "index.html",
             state=state,
             current_player_id=current_player_id,
-            scores=state.scores(),
+            scores=scores,
             winner=state.winner(),
             status=state.status,
-            search_query=q,
-            search_results=search_results,
-            info_message=info_message,
+            is_finished=state.is_finished(),
             current_player_anchor_count=anchor_count,
-            current_player_has_anchor=has_anchor,
-            current_player_can_use_trump=can_use_trump,
+            owned_counts=owned_counts,
+            total_flips=total_flips,
+            total_routes=total_routes,
+            trump_used=trump_used,
             map_iframe_src=map_iframe_src,
         )
 

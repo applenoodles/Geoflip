@@ -294,19 +294,19 @@ def test_route_all_failed(state_with_fpois, by_id):
 
 
 # ---------------------------------------------------------------------------
-# 16-turn full game
+# 12-turn full game
 # ---------------------------------------------------------------------------
 
-def test_finished_after_16_valid_moves():
-    """Drive 16 valid moves end-to-end and verify finished + winner/tie semantics."""
+def test_finished_after_12_valid_moves():
+    """Drive 12 valid moves end-to-end and verify finished + winner/tie semantics."""
     engine = RulesEngine()
     state = new_game()
 
-    # Generate 16 POIs along a line, 100m apart, alternating ownership target.
-    pois = [_make_extra_poi(f"poi_{i}", east_m=i * 100.0) for i in range(16)]
+    # Generate 12 POIs along a line, 100m apart, alternating ownership target.
+    pois = [_make_extra_poi(f"poi_{i}", east_m=i * 100.0) for i in range(12)]
     state.pois = list(pois)
 
-    for i in range(16):
+    for i in range(12):
         target = pois[i]
         cur = state.current_player_id()
         anchors = state.anchor_pois(cur)
@@ -318,11 +318,11 @@ def test_finished_after_16_valid_moves():
         state = res.state
 
     assert state.status == "finished"
-    assert state.turn_index == 16
+    assert state.turn_index == 12
     # winner() returns 1 / 2 / None — must be one of these
     assert state.winner() in {1, 2, None}
 
-    # 17th move is invalid
+    # 13th move is invalid
     extra = _make_extra_poi("extra", east_m=2000)
     state.pois.append(extra)
     osrm = FakeOsrm()
@@ -411,6 +411,13 @@ def test_web_flow_with_fake_services(tmp_path, fpois, by_id):
     book = by_id["node:1003"]
     osrm.register(book, hub, duration_s=180.0)
 
+    # Board is now seeded at setup time (Overpass), not via gameplay search.
+    # Direct-seed state_store with fpois — matches the post-setup invariant
+    # without coupling this test to OVERPASS_MIN_POIS thresholds.
+    seeded = new_game()
+    seeded.merge_discovered_pois(fpois)
+    state_store.save(seeded)
+
     app = create_app(
         config=Config(),
         state_store=state_store,
@@ -420,9 +427,6 @@ def test_web_flow_with_fake_services(tmp_path, fpois, by_id):
     app.config["TESTING"] = True
     client = app.test_client()
 
-    # GET /?q=... merges POIs into state
-    resp = client.get("/?q=anything")
-    assert resp.status_code == 200
     saved = state_store.load()
     assert len(saved.pois) == len(fpois)
 

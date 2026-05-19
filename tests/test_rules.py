@@ -570,15 +570,15 @@ def test_multi_anchor_picks_shortest_duration():
 # ---------------------------------------------------------------------------
 
 def test_finished_after_max_turns():
-    # Create a state with all 16 first-flag-style placements feasible (no anchors needed except first)
-    # Easier: take 16 free placements far from each other (each player only acts on first flag rule)
-    pois = [make_poi(f"p{i}", east_m=i * 5000) for i in range(16)]
+    # Create a state with all 12 first-flag-style placements feasible (no anchors needed except first)
+    # Easier: take 12 free placements far from each other (each player only acts on first flag rule)
+    pois = [make_poi(f"p{i}", east_m=i * 5000) for i in range(12)]
     state = _state_with_pois(*pois)
     engine = RulesEngine()
     # The rule says "first flag free" — for subsequent flags we need anchors w/ route ≤ 600.
     # So routing is needed from move 2 onwards (each player's 2nd+ flags).
     # Approach: link each new flag to player's previous (single) anchor with duration 0.
-    for i in range(16):
+    for i in range(12):
         target = pois[i]
         # current player anchors before this move:
         cur = state.current_player_id()
@@ -591,7 +591,7 @@ def test_finished_after_max_turns():
         state = res.state
 
     assert state.status == "finished"
-    assert state.turn_index == 16
+    assert state.turn_index == 12
 
 
 def test_move_after_finished_is_invalid():
