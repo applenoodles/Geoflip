@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import unescape
+import re
 from typing import Any
 
 import httpx
@@ -199,8 +201,22 @@ def _build_query(
         "(\n"
         f"{body}\n"
         ");\n"
-        f"out center tags qt {int(limit)};\n"
+        f"out center {int(limit)};\n"
     )
+
+
+def _response_error_summary(response: httpx.Response) -> str:
+    """Return a compact plain-text Overpass error body, if one exists."""
+    text = response.text
+    if not isinstance(text, str):
+        return ""
+    text = text.strip()
+    if not text:
+        return ""
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = unescape(text)
+    text = " ".join(text.split())
+    return text[:300]
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +270,7 @@ class OverpassClient:
 
         try:
             with httpx.Client(
+                headers={"User-Agent": "geoflip-coursework/0.1"},
                 timeout=self._timeout,
                 verify=self._ssl_context,
             ) as client:
@@ -263,9 +280,11 @@ class OverpassClient:
         except httpx.TimeoutException as exc:
             raise OverpassError("Overpass 服務暫時無法使用，請稍後再試") from exc
         except httpx.HTTPStatusError as exc:
-            raise OverpassError(
-                f"Overpass HTTP error {exc.response.status_code}"
-            ) from exc
+            detail = _response_error_summary(exc.response)
+            message = f"Overpass HTTP error {exc.response.status_code}"
+            if detail:
+                message = f"{message}: {detail}"
+            raise OverpassError(message) from exc
         except httpx.RequestError as exc:
             if is_certificate_verify_error(exc):
                 raise OverpassError(
