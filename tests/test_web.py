@@ -163,75 +163,31 @@ def test_index_renders(client):
     assert b"GeoFlip" in resp.data
 
 
-def test_index_no_query_does_not_call_nominatim(client, deps):
-    client.get("/")
-    assert deps["nominatim"].calls == []
-
-
-def test_index_with_query_calls_nominatim_and_merges(client, deps):
-    poi = _make_poi("p1")
-    deps["nominatim"].results = [poi]
-
-    resp = client.get("/?q=cafe")
-    assert resp.status_code == 200
-    assert len(deps["nominatim"].calls) == 1
-    assert deps["nominatim"].calls[0][0] == "cafe"
-
-    # State should now contain that POI
-    state = deps["state_store"].load()
-    assert any(p.id == "p1" for p in state.pois)
-
-
-def test_index_empty_results_shows_info_message(client, deps):
-    deps["nominatim"].results = []
-    resp = client.get("/?q=nothing")
-    assert resp.status_code == 200
-    assert "沒有找到可用 POI".encode("utf-8") in resp.data
-
-
-def test_index_nominatim_error_flashes(client, deps):
-    deps["nominatim"].error = NominatimError("backend down")
-    resp = client.get("/?q=x", follow_redirects=False)
-    assert resp.status_code == 200
-    # Should NOT have persisted anything; state remains a fresh new game
-    state = deps["state_store"].load()
-    assert state.pois == []
-
-
-def test_index_search_result_reflects_real_owner_not_nominatim_owner(client, deps):
-    """Regression: a re-searched POI already owned by P2 must show as owned in the UI.
-
-    merge_discovered_pois() correctly preserves the stored owner, but the previous
-    template rendered the fresh Nominatim objects (owner=None) and showed a
-    flag button. The view must rebuild search_results from state.
-    """
-    # Pre-seed: P2 already owns "p1"
+def test_index_does_not_call_nominatim(client, deps):
+    """The main game screen no longer has a POI search box."""
     state = new_game()
-    state.pois = [_make_poi("p1", owner=2)]
+    state.pois = [_make_poi("p1")]
     deps["state_store"].save(state)
 
-    # Nominatim returns a fresh copy of p1 with owner=None (typical)
-    fresh_p1 = _make_poi("p1", owner=None)
-    deps["nominatim"].results = [fresh_p1]
+    client.get("/")
+    assert deps["nominatim"].calls == []
+    assert deps["nominatim"].location_calls == []
 
-    resp = client.get("/?q=p1")
+
+def test_index_has_no_gameplay_search_form(client, deps):
+    """No GET-form to /, no in-game search box, no 搜尋 POI label."""
+    state = new_game()
+    state.pois = [_make_poi("p1")]
+    deps["state_store"].save(state)
+
+    resp = client.get("/")
     assert resp.status_code == 200
-    # Must surface the existing P2 ownership label
-    assert "Player 2".encode("utf-8") in resp.data
-    # Must NOT offer the "插旗" submit button for this owned POI
-    # (The disabled "不可插旗" button uses different text)
-    assert "不可插旗".encode("utf-8") in resp.data
-
-    # State sanity: owner unchanged
-    after = deps["state_store"].load()
-    assert after.get_poi("p1").owner == 2
-
-
-def test_index_query_does_not_advance_turn(client, deps):
-    deps["nominatim"].results = [_make_poi("p1")]
-    client.get("/?q=cafe")
-    state = deps["state_store"].load()
-    assert state.turn_index == 0
+    # The old gameplay POI search field used name="q" inside a GET form
+    # pointing back at /. After this change it must be gone.
+    assert b'name="q"' not in resp.data
+    assert "搜尋 POI".encode("utf-8") not in resp.data
+    # The setup-search form must NOT leak onto the game screen either.
+    assert b'action="/setup/search"' not in resp.data
 
 
 # ---------------------------------------------------------------------------
@@ -373,38 +329,23 @@ def test_api_state_fresh_when_no_file(client, deps):
 # Trump UI gating — flipped-only player must not get trump option
 # ---------------------------------------------------------------------------
 
-def test_can_use_trump_false_when_only_flipped_pois(client, deps):
-    """Player owns POIs (flipped) but has placed no flags → can_use_trump=False."""
+def test_sidebar_has_no_flag_form_or_trump_checkbox(client, deps):
+    """Trump and flag UI live in map popups now, never in the sidebar HTML."""
     state = new_game()
-    # POI owned by P1 but no MoveRecord placing it → not an anchor
-    state.pois = [_make_poi("flipped", owner=1)]
-    deps["state_store"].save(state)
-
-    resp = client.get("/")
-    assert resp.status_code == 200
-    # When can_use_trump is False there is no "使用王牌" checkbox label rendered.
-    assert "使用王牌".encode("utf-8") not in resp.data
-
-
-def test_can_use_trump_true_when_has_anchor(client, deps):
-    """Player placed a flag → anchor exists → trump UI should be available."""
-    state = new_game()
-    # Build a POI placed by P1 and still owned by P1
     state.pois = [_make_poi("anchor", owner=1), _make_poi("other", lat=25.05, lon=121.57)]
-    # Record the placement
     from app.models import MoveRecord
     state.moves.append(MoveRecord(
         turn_index=0, player_id=1, placed_poi_id="anchor",
         used_trump=False, route_ids=[], flipped_poi_ids=[],
     ))
-    state.turn_index = 2  # back to P1's turn (even)
+    state.turn_index = 2
     deps["state_store"].save(state)
 
-    # Search a query that returns the "other" neutral POI so a flag form renders
-    deps["nominatim"].results = [state.get_poi("other")]
-    resp = client.get("/?q=anything")
+    resp = client.get("/")
     assert resp.status_code == 200
-    assert "使用王牌".encode("utf-8") in resp.data
+    # No sidebar flag-placement form, no trump checkbox in the sidebar HTML.
+    assert b'name="poi_id"' not in resp.data
+    assert "使用王牌".encode("utf-8") not in resp.data
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +571,131 @@ def test_new_game_redirects_and_landing_page_is_setup(client, deps):
     assert resp.status_code == 200
     assert b'action="/setup/search"' in resp.data
     assert b'<iframe' not in resp.data
+
+
+# ---------------------------------------------------------------------------
+# End-of-game summary v1
+# ---------------------------------------------------------------------------
+
+def _finished_state_with_history():
+    """Build a finished GameState with a known mix of moves/routes/flips.
+
+    P1 placed two flags (one with trump), flipping 3 of P2's POIs.
+    P2 placed one flag, no flips. Two RouteRecords on the board.
+    """
+    from app.models import MoveRecord, RouteRecord
+
+    state = new_game()
+    # 1 P1-placed + 1 P1-flipped (still P1 since end-of-game)
+    # 1 P2-placed (their only POI)
+    # Plus 2 neutral leftovers to round out totals.
+    state.pois = [
+        _make_poi("p1_anchor", owner=1, lat=25.01, lon=121.51),
+        _make_poi("p1_grabbed", owner=1, lat=25.02, lon=121.52),
+        _make_poi("p2_anchor", owner=2, lat=25.03, lon=121.53),
+        _make_poi("neutral_a", owner=None, lat=25.04, lon=121.54),
+        _make_poi("neutral_b", owner=None, lat=25.05, lon=121.55),
+    ]
+    state.moves = [
+        MoveRecord(
+            turn_index=0, player_id=1, placed_poi_id="p1_anchor",
+            used_trump=False, route_ids=[], flipped_poi_ids=[],
+        ),
+        MoveRecord(
+            turn_index=1, player_id=2, placed_poi_id="p2_anchor",
+            used_trump=False, route_ids=["r1"], flipped_poi_ids=[],
+        ),
+        MoveRecord(
+            turn_index=2, player_id=1, placed_poi_id="p1_grabbed",
+            used_trump=True, route_ids=["r2"],
+            flipped_poi_ids=["f1", "f2", "f3"],
+        ),
+    ]
+    state.routes = [
+        RouteRecord(
+            id="r1", turn_index=1, player_id=2,
+            from_poi_id="p2_anchor", to_poi_id="p1_anchor",
+            coordinates_lonlat=[[121.51, 25.01], [121.53, 25.03]],
+            distance_m=100.0, duration_s=120.0, buffer_m=50.0,
+        ),
+        RouteRecord(
+            id="r2", turn_index=2, player_id=1,
+            from_poi_id="p1_anchor", to_poi_id="p1_grabbed",
+            coordinates_lonlat=[[121.51, 25.01], [121.52, 25.02]],
+            distance_m=80.0, duration_s=90.0, buffer_m=150.0,
+        ),
+    ]
+    state.players[1].trump_available = False  # P1 spent trump
+    state.status = "finished"
+    return state
+
+
+def test_summary_absent_when_game_active(client, deps):
+    state = new_game()
+    state.pois = [_make_poi("p1")]
+    deps["state_store"].save(state)
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "對局總結".encode("utf-8") not in resp.data
+
+
+def test_summary_shows_winner_and_scores_when_finished(client, deps):
+    state = _finished_state_with_history()
+    deps["state_store"].save(state)
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.data
+    # Header
+    assert "對局總結".encode("utf-8") in body
+    # Winner = P1 (owns p1_anchor + p1_grabbed; P2 owns just p2_anchor)
+    assert "Player 1 勝利".encode("utf-8") in body
+    # Final scores line
+    assert "最終分數".encode("utf-8") in body
+
+
+def test_summary_shows_owned_counts_flips_routes_and_trump(client, deps):
+    state = _finished_state_with_history()
+    deps["state_store"].save(state)
+
+    resp = client.get("/")
+    body = resp.data
+    # Owned counts: P1=2, P2=1
+    assert "P1 擁有 POI：2 個".encode("utf-8") in body
+    assert "P2 擁有 POI：1 個".encode("utf-8") in body
+    # Total flips = 0 + 0 + 3 = 3
+    assert "總翻面次數：3".encode("utf-8") in body
+    # Total routes = 2
+    assert "總路線數：2".encode("utf-8") in body
+    # Trump usage — P1 used, P2 did not
+    assert "P1 王牌：已使用".encode("utf-8") in body
+    assert "P2 王牌：未使用".encode("utf-8") in body
+
+
+def test_summary_shows_tie_when_scores_equal(client, deps):
+    from app.models import MoveRecord
+
+    state = new_game()
+    state.pois = [
+        _make_poi("a", owner=1, lat=25.01, lon=121.51),
+        _make_poi("b", owner=2, lat=25.02, lon=121.52),
+    ]
+    state.moves = [
+        MoveRecord(turn_index=0, player_id=1, placed_poi_id="a",
+                   used_trump=False, route_ids=[], flipped_poi_ids=[]),
+        MoveRecord(turn_index=1, player_id=2, placed_poi_id="b",
+                   used_trump=False, route_ids=[], flipped_poi_ids=[]),
+    ]
+    state.status = "finished"
+    deps["state_store"].save(state)
+
+    resp = client.get("/")
+    body = resp.data
+    assert "對局總結".encode("utf-8") in body
+    assert "平手".encode("utf-8") in body
+    assert "Player 1 勝利".encode("utf-8") not in body
+    assert "Player 2 勝利".encode("utf-8") not in body
 
 
 def test_create_app_no_args_works(tmp_path, monkeypatch):

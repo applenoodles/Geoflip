@@ -81,24 +81,24 @@ def test_new_game_trump_available():
     assert state.players[2].trump_available is True
 
 
-def test_new_game_16_max_turns():
+def test_new_game_12_max_turns():
     state = new_game()
-    assert state.max_turns == 16
+    assert state.max_turns == 12
 
 
 # ---------------------------------------------------------------------------
 # is_finished / current_player_id
 # ---------------------------------------------------------------------------
 
-def test_is_finished_after_16_turns():
+def test_is_finished_after_12_turns():
     state = new_game()
-    state.turn_index = 16
+    state.turn_index = 12
     assert state.is_finished()
 
 
-def test_is_finished_false_at_15():
+def test_is_finished_false_at_11():
     state = new_game()
-    state.turn_index = 15
+    state.turn_index = 11
     assert not state.is_finished()
 
 
@@ -218,7 +218,7 @@ def test_winner_none_when_active():
 
 def test_winner_player1_wins():
     state = new_game()
-    state.turn_index = 16
+    state.turn_index = 12
     state.status = "finished"
     state.pois = [_make_poi("a", score=3, owner=1), _make_poi("b", score=1, owner=2)]
     assert state.winner() == 1
@@ -226,7 +226,7 @@ def test_winner_player1_wins():
 
 def test_winner_tie_returns_none():
     state = new_game()
-    state.turn_index = 16
+    state.turn_index = 12
     state.status = "finished"
     state.pois = [_make_poi("a", score=2, owner=1), _make_poi("b", score=2, owner=2)]
     assert state.winner() is None

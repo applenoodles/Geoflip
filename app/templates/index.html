@@ -21,10 +21,8 @@
         <p>P1 王牌：{{ "可用" if state.players[1].trump_available else "已用" }}</p>
         <p>P2 王牌：{{ "可用" if state.players[2].trump_available else "已用" }}</p>
         <p>目前玩家 anchor 數：{{ current_player_anchor_count }}</p>
-        {% if status == "finished" %}
-          <p class="result">
-            {% if winner %}Player {{ winner }} 勝利{% else %}平手{% endif %}
-          </p>
+        {% if not is_finished %}
+          <p class="hint">在地圖上點擊中立 POI 即可插旗。</p>
         {% endif %}
       </section>
 
@@ -38,43 +36,19 @@
         {% endif %}
       {% endwith %}
 
-      <section class="search">
-        <form method="get" action="{{ url_for('index') }}">
-          <label>搜尋 POI（按 enter 送出）：
-            <input type="text" name="q" value="{{ search_query|default('') }}">
-          </label>
-          <button type="submit">搜尋</button>
-        </form>
-        {% if info_message %}
-          <p class="info">{{ info_message }}</p>
-        {% endif %}
-      </section>
-
-      {% if search_results %}
-        <section class="results">
-          <h2>搜尋結果</h2>
-          <ul>
-            {% for poi in search_results %}
-              <li class="poi-card">
-                <strong>{{ poi.name }}</strong>
-                <div class="meta">{{ poi.category }} / {{ poi.poi_type }} · {{ poi.score }} 分</div>
-                {% if poi.owner %}
-                  <div class="owned">已被 Player {{ poi.owner }} 擁有</div>
-                  <button type="button" disabled>不可插旗</button>
-                {% else %}
-                  <form method="post" action="{{ url_for('move') }}">
-                    <input type="hidden" name="poi_id" value="{{ poi.id }}">
-                    {% if current_player_can_use_trump %}
-                      <label>
-                        <input type="checkbox" name="use_trump"> 使用王牌
-                      </label>
-                    {% endif %}
-                    <button type="submit">插旗</button>
-                  </form>
-                {% endif %}
-              </li>
-            {% endfor %}
-          </ul>
+      {% if is_finished %}
+        <section class="summary">
+          <h2>對局總結</h2>
+          <p class="winner">
+            {% if winner %}Player {{ winner }} 勝利{% else %}平手{% endif %}
+          </p>
+          <p>最終分數：P1 {{ scores[1] }}　·　P2 {{ scores[2] }}</p>
+          <p>P1 擁有 POI：{{ owned_counts[1] }} 個</p>
+          <p>P2 擁有 POI：{{ owned_counts[2] }} 個</p>
+          <p>總翻面次數：{{ total_flips }}</p>
+          <p>總路線數：{{ total_routes }}</p>
+          <p>P1 王牌：{{ "已使用" if trump_used[1] else "未使用" }}</p>
+          <p>P2 王牌：{{ "已使用" if trump_used[2] else "未使用" }}</p>
         </section>
       {% endif %}
 

@@ -1,9 +1,13 @@
 # GeoFlip
 
 A 2-player hotseat geographic flag-planting game. Two players take turns in the
-same browser, searching for real-world POIs and planting flags within walking
-distance to flip the opponent's nearby flags. After 16 turns the player with the
-higher total POI score wins.
+same browser, planting flags on real-world POIs within walking distance to flip
+the opponent's nearby flags. At setup one player searches a starting location
+via Nominatim; the server then uses Overpass to build a board of nearby POIs.
+During the match players no longer search — they click visible POIs on the map.
+After 12 turns the player with the higher total POI score wins; an end-of-game
+summary in the sidebar shows winner, scores, owned-POI counts, total flips,
+total routes, and trump usage.
 
 This is a local single-machine game — no accounts, no database, no online
 multiplayer. State is persisted to a single JSON file.
@@ -12,9 +16,10 @@ multiplayer. State is persisted to a single JSON file.
 
 ## Game rules (summary)
 
-1. **Hotseat, 16 turns total.** Even turns → Player 1, odd turns → Player 2.
-2. Flags can only be planted on **POIs returned by Nominatim** that the server
-   already knows about (you must search first to bring POIs into play).
+1. **Hotseat, 12 turns total.** Even turns → Player 1, odd turns → Player 2.
+2. The board is built at setup time: one player searches a starting location
+   via Nominatim and the server uses Overpass to populate nearby POIs. After
+   setup the only way to place a flag is to click a visible POI on the map.
 3. Only **neutral** POIs (no owner) can be flagged.
 4. **First flag is free** for each player — no distance check.
 5. From the second flag onward, the new flag must be reachable by **OSRM walking
@@ -109,17 +114,22 @@ All tests run fully offline — Nominatim/OSRM HTTP calls are mocked.
 3. `cp .env.example .env` and fill in `NOMINATIM_USER_AGENT` / `NOMINATIM_EMAIL`
 4. `python -m app.web`
 5. Open <http://127.0.0.1:5000/>
-6. Type a real search term in the sidebar (e.g. `新竹車站`) and press enter
-7. **P1 plants first flag** on any neutral POI
-8. **P2 plants first flag** on any neutral POI
-9. **P1 searches nearby** (e.g. another café) and plants a second flag — confirm
-   that POIs ≤ 600 s walk from P1's first flag are accepted and that a route
+6. On the setup screen, search a starting location (e.g. `新竹車站`) and pick
+   one candidate; the server fetches the board via Overpass and renders the map
+7. **P1 plants first flag** by clicking a neutral POI on the map and submitting
+   the popup form
+8. **P2 plants first flag** by clicking another neutral POI
+9. **P1 clicks another nearby POI** and plants a second flag — confirm that
+   POIs ≤ 600 s walk from P1's first flag are accepted and that a route
    appears on the map
 10. Try a POI > 600 s walk away and confirm the placement is rejected with
     an error flash
-11. Use **trump** on a long-ish route and verify a wider buffer flips more
-    opponent POIs (and that trump is greyed out afterwards)
-12. Play until turn 16 and verify the winner / tie banner appears
+11. Use **trump** (checkbox inside the popup) on a long-ish route and verify a
+    wider buffer flips more opponent POIs (and that trump is greyed out
+    afterwards)
+12. Play until the game finishes and verify the sidebar end-summary shows
+    winner, scores, owned-POI counts, total flips, total routes, and trump
+    usage
 
 ---
 
@@ -156,8 +166,9 @@ content, hard-reload the page (Ctrl+Shift+R).
   if you need heavy use.
 - **State is a single JSON file**, atomic write via tmp→replace. Not a
   database — there is no concurrent writer protection.
-- **POI universe is whatever you've searched.** A POI must be brought into
-  the game via Nominatim search before it can be flagged.
+- **POI universe is set at setup.** The Overpass fetch around the chosen
+  starting location is the entire pool of flaggable POIs for the match;
+  there is no in-game search to add more.
 
 ---
 
