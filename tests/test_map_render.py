@@ -249,6 +249,43 @@ def test_finished_state_tie_shown(cfg):
 
 
 # ---------------------------------------------------------------------------
+# View persistence (BUG-B: zoom/center reset after each flag)
+# ---------------------------------------------------------------------------
+
+def test_render_injects_view_persistence_js(cfg):
+    """Injected JS must save/restore the Leaflet view via sessionStorage."""
+    state = new_game()
+    state.pois = [_poi("p1")]
+    html = render_map_html(state, cfg)
+    assert "sessionStorage" in html
+    assert "setView" in html
+    # map event bindings that capture the player's view
+    assert 'moveend' in html
+    assert 'zoomend' in html
+
+
+def test_render_view_restore_runs_after_fit_bounds(cfg):
+    """A restored view must override fit_bounds → setView emitted after it."""
+    state = new_game()
+    state.pois = [
+        _poi("a", lat=25.00, lon=121.50),
+        _poi("b", lat=25.10, lon=121.60),
+    ]
+    html = render_map_html(state, cfg)
+    assert "fitBounds" in html
+    assert html.index("setView") > html.index("fitBounds")
+
+
+def test_render_empty_board_guards_restore_with_storage(cfg):
+    """First entry (no POIs) still renders; restore is guarded by sessionStorage."""
+    state = new_game()
+    html = render_map_html(state, cfg)
+    # Persistence JS is present but only setViews when a saved view exists.
+    assert "sessionStorage" in html
+    assert "if (_gfRaw)" in html
+
+
+# ---------------------------------------------------------------------------
 # Render does NOT mutate state
 # ---------------------------------------------------------------------------
 
