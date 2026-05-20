@@ -150,11 +150,6 @@ def render_map_html(state: GameState, config: Config) -> str:
             weight=5 if is_trump else 3,
             opacity=0.85,
             dash_array="10,6" if is_trump else None,
-            tooltip=(
-                f"Player {route.player_id} · "
-                f"{route.duration_s:.0f}s · "
-                f"buffer {int(route.buffer_m)}m"
-            ),
         ).add_to(fmap)
 
     # ---- markers (z-top: drawn last so they sit above buffers + routes) ----
@@ -284,9 +279,6 @@ def _render_route_buffers(fmap: folium.Map, state: GameState) -> None:
                 fill_color=color,
                 fill_opacity=0.15,
                 dash_array="6,4" if is_trump else None,
-                tooltip=(
-                    f"Player {route.player_id} buffer · {int(route.buffer_m)}m"
-                ),
             ).add_to(fmap)
 
 

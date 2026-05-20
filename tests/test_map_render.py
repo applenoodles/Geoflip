@@ -176,6 +176,37 @@ def test_render_route_polyline_present(cfg):
     assert "polyline" in html.lower()
 
 
+def test_render_route_has_no_tooltip_binding(cfg):
+    """Route PolyLine must not bind a Leaflet tooltip (BUG-01: black hover box)."""
+    state = new_game()
+    state.routes.append(RouteRecord(
+        id="route_1", turn_index=0, player_id=1,
+        from_poi_id="x", to_poi_id="y",
+        coordinates_lonlat=[[121.5654, 25.0330], [121.5700, 25.0400]],
+        distance_m=100.0, duration_s=80.0, buffer_m=50,
+    ))
+    html = render_map_html(state, cfg)
+    # The previous tooltip text "buffer 50m" / "Player 1 · 80s" must not appear.
+    assert "buffer 50m" not in html
+    assert "Player 1 · 80s" not in html.replace("&middot;", "·")
+    # And no .bindTooltip( call should be wired on a polyline tooltip text.
+    # (Marker tooltips remain, so we only assert absence of route-specific text.)
+
+
+def test_render_buffer_polygon_has_no_tooltip_binding(cfg):
+    """Buffer polygons must not bind a Leaflet tooltip (BUG-01)."""
+    state = new_game()
+    state.routes.append(RouteRecord(
+        id="route_1", turn_index=0, player_id=1,
+        from_poi_id="x", to_poi_id="y",
+        coordinates_lonlat=[[121.5654, 25.0330], [121.5700, 25.0400]],
+        distance_m=100.0, duration_s=80.0, buffer_m=50,
+    ))
+    html = render_map_html(state, cfg)
+    assert "buffer · 50m" not in html
+    assert "Player 1 buffer" not in html
+
+
 def test_render_trump_route_styled_differently(cfg):
     state = new_game()
     state.routes.append(RouteRecord(

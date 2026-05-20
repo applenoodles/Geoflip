@@ -19,7 +19,9 @@
       "Bash(python -m pytest --tb=short)",
       "Bash(python -m pytest tests/test_web.py --tb=short)",
       "Bash(python -m pytest tests/test_integration.py --tb=short)",
-      "Bash(python -m pytest tests/test_map_render.py --tb=short)"
+      "Bash(python -m pytest tests/test_map_render.py --tb=short)",
+      "Bash(git add *)",
+      "Bash(python -m pytest tests/test_map_render.py)"
     ]
   }
 }
