@@ -295,6 +295,17 @@ def test_render_injects_view_persistence_js(cfg):
     assert 'zoomend' in html
 
 
+def test_render_view_key_is_scoped_to_game_id(cfg):
+    """sessionStorage key must embed game_id so a new board doesn't inherit an old view."""
+    state = new_game()
+    state.pois = [_poi("p1")]
+    html = render_map_html(state, cfg)
+    # The key must contain the actual game_id, not a placeholder.
+    assert state.game_id in html
+    assert "__GAME_ID__" not in html
+    assert "geoflip_view_" + state.game_id in html
+
+
 def test_render_view_restore_runs_after_fit_bounds(cfg):
     """A restored view must override fit_bounds → setView emitted after it."""
     state = new_game()

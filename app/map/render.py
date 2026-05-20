@@ -217,7 +217,8 @@ def render_map_html(state: GameState, config: Config) -> str:
 
     # ---- persist/restore pan+zoom across iframe reloads (BUG-B) ----
     # Added last so its script runs AFTER fit_bounds and can override it.
-    _inject_view_persistence(fmap)
+    # game_id scopes the key so a new board always starts at fit_bounds.
+    _inject_view_persistence(fmap, state.game_id)
 
     return fmap.get_root().render()
 
@@ -294,7 +295,7 @@ def _render_route_buffers(fmap: folium.Map, state: GameState) -> None:
 # map's JS global. No Jinja tags here (single braces only).
 _VIEW_PERSIST_JS = """
 var _gfMap = __MAP_NAME__;
-var _GF_KEY = "geoflip_map_view";
+var _GF_KEY = "geoflip_view___GAME_ID__";
 function _gfSaveView() {
     try {
         var c = _gfMap.getCenter();
@@ -318,13 +319,18 @@ _gfMap.on("zoomend", _gfSaveView);
 """
 
 
-def _inject_view_persistence(fmap: folium.Map) -> None:
+def _inject_view_persistence(fmap: folium.Map, game_id: str) -> None:
     """Inject JS that saves/restores the Leaflet view via sessionStorage.
 
-    Added as the map's last child so its script is emitted after fit_bounds;
-    a restored view therefore overrides the initial bounds fit.
+    The key is scoped to game_id so a new board always starts at fit_bounds
+    rather than inheriting the previous game's saved view.
+    Added as the map's last child so its script runs AFTER fit_bounds.
     """
-    js = _VIEW_PERSIST_JS.replace("__MAP_NAME__", fmap.get_name())
+    js = (
+        _VIEW_PERSIST_JS
+        .replace("__MAP_NAME__", fmap.get_name())
+        .replace("__GAME_ID__", game_id)
+    )
     macro = MacroElement()
     macro._template = Template(
         "{% macro script(this, kwargs) %}" + js + "{% endmacro %}"
