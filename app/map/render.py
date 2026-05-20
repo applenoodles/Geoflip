@@ -13,6 +13,8 @@ from __future__ import annotations
 from html import escape
 
 import folium
+from branca.element import MacroElement
+from jinja2 import Template
 
 from app.config import Config
 from app.models import GameState, Poi
@@ -213,6 +215,10 @@ def render_map_html(state: GameState, config: Config) -> str:
         )
         fmap.get_root().html.add_child(folium.Element(banner_html))
 
+    # ---- persist/restore pan+zoom across iframe reloads (BUG-B) ----
+    # Added last so its script runs AFTER fit_bounds and can override it.
+    _inject_view_persistence(fmap)
+
     return fmap.get_root().render()
 
 
@@ -280,6 +286,50 @@ def _render_route_buffers(fmap: folium.Map, state: GameState) -> None:
                 fill_opacity=0.15,
                 dash_array="6,4" if is_trump else None,
             ).add_to(fmap)
+
+
+# Restores a previously saved pan/zoom (if any) and keeps sessionStorage in
+# sync on every moveend/zoomend. With no saved view, the render's fit_bounds
+# stands — so a fresh board still shows every POI. __MAP_NAME__ is the Folium
+# map's JS global. No Jinja tags here (single braces only).
+_VIEW_PERSIST_JS = """
+var _gfMap = __MAP_NAME__;
+var _GF_KEY = "geoflip_map_view";
+function _gfSaveView() {
+    try {
+        var c = _gfMap.getCenter();
+        sessionStorage.setItem(_GF_KEY, JSON.stringify(
+            {lat: c.lat, lon: c.lng, zoom: _gfMap.getZoom()}));
+    } catch (e) {}
+}
+try {
+    var _gfRaw = sessionStorage.getItem(_GF_KEY);
+    if (_gfRaw) {
+        var _gfView = JSON.parse(_gfRaw);
+        if (_gfView && isFinite(_gfView.lat) && isFinite(_gfView.lon)
+                && isFinite(_gfView.zoom)) {
+            _gfMap.setView([_gfView.lat, _gfView.lon], _gfView.zoom,
+                {animate: false});
+        }
+    }
+} catch (e) {}
+_gfMap.on("moveend", _gfSaveView);
+_gfMap.on("zoomend", _gfSaveView);
+"""
+
+
+def _inject_view_persistence(fmap: folium.Map) -> None:
+    """Inject JS that saves/restores the Leaflet view via sessionStorage.
+
+    Added as the map's last child so its script is emitted after fit_bounds;
+    a restored view therefore overrides the initial bounds fit.
+    """
+    js = _VIEW_PERSIST_JS.replace("__MAP_NAME__", fmap.get_name())
+    macro = MacroElement()
+    macro._template = Template(
+        "{% macro script(this, kwargs) %}" + js + "{% endmacro %}"
+    )
+    fmap.add_child(macro)
 
 
 def _compute_center(state: GameState, config: Config) -> tuple[float, float]:

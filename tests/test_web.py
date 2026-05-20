@@ -191,6 +191,47 @@ def test_index_has_no_gameplay_search_form(client, deps):
 
 
 # ---------------------------------------------------------------------------
+# Flash auto-dismiss (BUG-A: success banner never disappears)
+# ---------------------------------------------------------------------------
+
+def test_index_has_flash_auto_dismiss_script(client, deps):
+    """The auto-dismiss script must be present on the game page."""
+    state = new_game()
+    state.pois = [_make_poi("p1")]
+    deps["state_store"].save(state)
+
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert b"data-auto-dismiss" in resp.data
+    assert b"flash--dismissing" in resp.data
+
+
+def test_success_flash_is_marked_for_auto_dismiss(client, deps):
+    """A successful flag placement flashes success WITH the auto-dismiss marker."""
+    state = new_game()
+    state.pois = [_make_poi("p1")]
+    deps["state_store"].save(state)
+
+    resp = client.post("/move", data={"poi_id": "p1"}, follow_redirects=True)
+    assert resp.status_code == 200
+    # Success flash carries the auto-dismiss attribute.
+    assert b'class="flash success" data-auto-dismiss' in resp.data
+
+
+def test_error_flash_is_not_auto_dismissed(client, deps):
+    """An error flash must NOT carry the auto-dismiss marker so it persists."""
+    state = new_game()
+    state.pois = [_make_poi("p1")]
+    deps["state_store"].save(state)
+
+    # Missing poi_id → error flash, but board stays so the game page renders it.
+    resp = client.post("/move", data={}, follow_redirects=True)
+    assert resp.status_code == 200
+    assert b'class="flash error"' in resp.data
+    assert b'class="flash error" data-auto-dismiss' not in resp.data
+
+
+# ---------------------------------------------------------------------------
 # POST /move — success
 # ---------------------------------------------------------------------------
 
@@ -298,6 +339,18 @@ def test_map_returns_html(client):
     resp = client.get("/map")
     assert resp.status_code == 200
     assert b"<html" in resp.data.lower() or b"<!doctype" in resp.data.lower()
+
+
+def test_map_view_includes_view_persistence_js(client, deps):
+    """The served /map page must carry the sessionStorage view-restore JS."""
+    state = new_game()
+    state.pois = [_make_poi("p1")]
+    deps["state_store"].save(state)
+
+    resp = client.get("/map")
+    assert resp.status_code == 200
+    assert b"sessionStorage" in resp.data
+    assert b"setView" in resp.data
 
 
 # ---------------------------------------------------------------------------

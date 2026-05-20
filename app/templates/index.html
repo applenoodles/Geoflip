@@ -30,7 +30,7 @@
         {% if messages %}
           <ul class="flashes">
             {% for cat, msg in messages %}
-              <li class="flash {{ cat }}">{{ msg }}</li>
+              <li class="flash {{ cat }}"{% if cat == 'success' %} data-auto-dismiss="2500"{% endif %}>{{ msg }}</li>
             {% endfor %}
           </ul>
         {% endif %}
@@ -79,5 +79,21 @@
     </main>
 
   </div>
+
+  <script>
+    // Auto-dismiss success flashes only; errors stay until the page reloads
+    // so players don't miss why a move failed.
+    (function () {
+      var FADE_MS = 400;
+      var nodes = document.querySelectorAll('.flash[data-auto-dismiss]');
+      Array.prototype.forEach.call(nodes, function (el) {
+        var delay = parseInt(el.getAttribute('data-auto-dismiss'), 10) || 2500;
+        setTimeout(function () {
+          el.classList.add('flash--dismissing');
+          setTimeout(function () { el.remove(); }, FADE_MS);
+        }, delay);
+      });
+    })();
+  </script>
 </body>
 </html>
