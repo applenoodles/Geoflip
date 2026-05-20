@@ -52,6 +52,21 @@
         </section>
       {% endif %}
 
+      <section class="rules-help">
+        <details>
+          <summary>遊戲規則說明</summary>
+          <ol class="rules-list">
+            <li>共 {{ state.max_turns }} 回合，兩位玩家在同一台機器上輪流插旗。</li>
+            <li>插旗方式：直接點地圖上的中立 POI 即可選擇該地點。</li>
+            <li>當你還沒有任何 anchor（你親手插下、且尚未被對手翻走的 POI）時，可以自由落子，此時不能啟動王牌。</li>
+            <li>已經有 anchor 時，系統會從新落子點嘗試走到你「每一個」anchor，取其中<strong>步行時間最短</strong>的成功路線；若該最短路線超過 10 分鐘（600 秒），這一手無效，不會消耗回合或王牌。</li>
+            <li>只有這條最短路線會被畫到地圖上，其 buffer 內若有對手的 POI 會立刻翻面成為你的。翻面而來的 POI 不算 anchor，不能當作下一手的路線起點。</li>
+            <li>普通路線 buffer 為 50m；啟動王牌時 buffer 放大為 150m。每位玩家整局只能啟動王牌 1 次。</li>
+            <li>分數即時依目前 POI 擁有者計算。{{ state.max_turns }} 回合走完後，分數較高者獲勝，相同則平手。</li>
+          </ol>
+        </details>
+      </section>
+
       <section class="newgame">
         <form method="post" action="{{ url_for('new_game_route') }}">
           <button type="submit">新開局</button>

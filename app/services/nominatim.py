@@ -34,12 +34,24 @@ class LocationCandidate:
     osm_id: int | None = None
     category: str = ""
     poi_type: str = ""
+    country_code: str = ""
+    country_label: str = ""
+    address_summary: str = ""
 
     @property
     def short_label(self) -> str:
         if self.category and self.poi_type:
             return f"{self.category}:{self.poi_type}"
         return self.category or self.poi_type or ""
+
+    @property
+    def country_display(self) -> str:
+        """Best human-readable country label, falling back to the ISO code."""
+        if self.country_label:
+            return self.country_label
+        if self.country_code:
+            return self.country_code.upper()
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +166,12 @@ def _normalize(result: dict) -> Poi | None:
     )
 
 
+_ADDRESS_SUMMARY_KEYS: tuple[str, ...] = (
+    "city", "town", "village", "suburb", "neighbourhood",
+    "county", "state", "region",
+)
+
+
 def _normalize_location(result: dict) -> LocationCandidate | None:
     """Convert one Nominatim result dict into a LocationCandidate.
 
@@ -183,6 +201,26 @@ def _normalize_location(result: dict) -> LocationCandidate | None:
         or "Unknown"
     )
 
+    address = result.get("address") or {}
+    if not isinstance(address, dict):
+        address = {}
+    country_code = str(address.get("country_code") or "").strip().lower()
+    country_label = str(address.get("country") or "").strip()
+
+    summary_parts: list[str] = []
+    seen_parts: set[str] = set()
+    for key in _ADDRESS_SUMMARY_KEYS:
+        val = address.get(key)
+        if not val:
+            continue
+        v = str(val).strip()
+        if v and v not in seen_parts:
+            seen_parts.add(v)
+            summary_parts.append(v)
+        if len(summary_parts) >= 3:
+            break
+    address_summary = ", ".join(summary_parts)
+
     return LocationCandidate(
         display_name=display_name,
         lat=lat,
@@ -191,6 +229,9 @@ def _normalize_location(result: dict) -> LocationCandidate | None:
         osm_id=osm_id,
         category=result.get("class", "") or "",
         poi_type=result.get("type", "") or "",
+        country_code=country_code,
+        country_label=country_label,
+        address_summary=address_summary,
     )
 
 
@@ -370,6 +411,7 @@ class NominatimClient:
             "format": "jsonv2",
             "q": query,
             "limit": limit,
+            "addressdetails": 1,
             "dedupe": 1,
             "email": self._email,
         }
@@ -419,6 +461,10 @@ class NominatimClient:
                 continue
             seen.add(dedup_key)
             candidates.append(candidate)
+
+        # Surface Taiwan results first without dropping foreign ones —
+        # stable sort preserves Nominatim's relevance order within each bucket.
+        candidates.sort(key=lambda c: 0 if c.country_code == "tw" else 1)
 
         self._location_cache[key] = candidates
         return candidates
