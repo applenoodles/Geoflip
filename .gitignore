@@ -145,3 +145,9 @@ cython_debug/
 
 # VS Code
 .vscode/
+
+# Local GeoFlip runtime state and agent-only settings
+data/state.json
+app/data/
+.claude/settings.local.json
+.claude/worktrees/
