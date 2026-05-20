@@ -17,7 +17,7 @@ from branca.element import MacroElement
 from jinja2 import Template
 
 from app.config import Config
-from app.models import GameState, Poi
+from app.models import GameState, Poi, RouteRecord
 from app.services.geometry import (
     build_meter_transformers,
     buffer_route_meters,
@@ -44,6 +44,27 @@ def _owner_color(owner: int | None) -> str:
     if owner is None:
         return _NEUTRAL_COLOR
     return _PLAYER_COLORS.get(owner, _NEUTRAL_COLOR)
+
+
+def _active_routes(state: GameState) -> list[RouteRecord]:
+    """Routes still worth showing on the board.
+
+    A route (and its buffer) is only rendered while both endpoints still
+    belong to the player who drew it. Once either endpoint goes neutral or
+    is flipped by the opponent, the route is stale and must disappear —
+    line AND buffer together. `state.routes` is read-only here; the history
+    is kept for scoring/debug.
+    """
+    active: list[RouteRecord] = []
+    for route in state.routes:
+        from_poi = state.get_poi(route.from_poi_id)
+        to_poi = state.get_poi(route.to_poi_id)
+        if from_poi is None or to_poi is None:
+            continue
+        if from_poi.owner != route.player_id or to_poi.owner != route.player_id:
+            continue
+        active.append(route)
+    return active
 
 
 # ---------------------------------------------------------------------------
@@ -133,11 +154,14 @@ def render_map_html(state: GameState, config: Config) -> str:
         and state.players[current_pid].trump_available
     )
 
+    # ---- only routes whose endpoints both still belong to the drawer ----
+    active_routes = _active_routes(state)
+
     # ---- buffers (z-bottom: drawn first so markers + routes stay clickable) ----
-    _render_route_buffers(fmap, state)
+    _render_route_buffers(fmap, active_routes)
 
     # ---- routes ----
-    for route in state.routes:
+    for route in active_routes:
         # OSRM/GeoJSON gives [lon, lat] — Folium wants [lat, lon]. Flip here.
         latlon_path = [[pt[1], pt[0]] for pt in route.coordinates_lonlat]
         if len(latlon_path) < 2:
@@ -227,18 +251,22 @@ def render_map_html(state: GameState, config: Config) -> str:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _render_route_buffers(fmap: folium.Map, state: GameState) -> None:
-    """Draw a semi-transparent polygon for each past route buffer.
+def _render_route_buffers(fmap: folium.Map, routes: list[RouteRecord]) -> None:
+    """Draw a semi-transparent polygon for each active route buffer.
+
+    `routes` is the already-filtered list of currently-valid routes — a
+    stale route's buffer must vanish along with its line, so callers pass
+    the same filtered list used for the polylines.
 
     Buffers are drawn before routes and markers so the flag pins and
     polylines stay clickable on top. Trump buffers (≥150m) use a dashed
     outline; normal buffers (≤50m) use a solid outline.
     """
-    if not state.routes:
+    if not routes:
         return
 
     ref_pair: list[float] | None = None
-    for route in state.routes:
+    for route in routes:
         if route.coordinates_lonlat:
             ref_pair = route.coordinates_lonlat[0]
             break
@@ -248,7 +276,7 @@ def _render_route_buffers(fmap: folium.Map, state: GameState) -> None:
     ref_lon, ref_lat = float(ref_pair[0]), float(ref_pair[1])
     to_meters, to_wgs84 = build_meter_transformers(ref_lon, ref_lat)
 
-    for route in state.routes:
+    for route in routes:
         if len(route.coordinates_lonlat) < 2 or route.buffer_m <= 0:
             continue
         try:

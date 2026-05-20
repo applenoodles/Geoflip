@@ -43,6 +43,22 @@ def _poi(
     )
 
 
+def _add_route_with_endpoints(state, route, *, from_owner=None, to_owner=None):
+    """Append `route` plus its two endpoint POIs, owned so the route renders.
+
+    A route is only drawn while both endpoints are owned by the player who
+    drew it. Tests that want a route on the map must register matching POIs;
+    pass from_owner/to_owner to simulate an endpoint being flipped away.
+    """
+    from_owner = route.player_id if from_owner is None else from_owner
+    to_owner = route.player_id if to_owner is None else to_owner
+    coords = route.coordinates_lonlat or [[121.56, 25.03]]
+    start, end = coords[0], coords[-1]
+    state.pois.append(_poi(route.from_poi_id, lat=start[1], lon=start[0], owner=from_owner))
+    state.pois.append(_poi(route.to_poi_id, lat=end[1], lon=end[0], owner=to_owner))
+    state.routes.append(route)
+
+
 @pytest.fixture()
 def cfg():
     return Config()
@@ -136,7 +152,7 @@ def test_render_owner_colors_differ(cfg):
 def test_render_route_flips_lonlat_to_latlon(cfg):
     """Route stored as [lon, lat] must be emitted as [lat, lon] in Folium JS."""
     state = new_game()
-    state.routes.append(RouteRecord(
+    _add_route_with_endpoints(state, RouteRecord(
         id="route_1",
         turn_index=0,
         player_id=1,
@@ -166,7 +182,7 @@ def test_render_route_flips_lonlat_to_latlon(cfg):
 
 def test_render_route_polyline_present(cfg):
     state = new_game()
-    state.routes.append(RouteRecord(
+    _add_route_with_endpoints(state, RouteRecord(
         id="route_1", turn_index=0, player_id=1,
         from_poi_id="x", to_poi_id="y",
         coordinates_lonlat=[[121.5, 25.0], [121.51, 25.01]],
@@ -179,7 +195,7 @@ def test_render_route_polyline_present(cfg):
 def test_render_route_has_no_tooltip_binding(cfg):
     """Route PolyLine must not bind a Leaflet tooltip (BUG-01: black hover box)."""
     state = new_game()
-    state.routes.append(RouteRecord(
+    _add_route_with_endpoints(state, RouteRecord(
         id="route_1", turn_index=0, player_id=1,
         from_poi_id="x", to_poi_id="y",
         coordinates_lonlat=[[121.5654, 25.0330], [121.5700, 25.0400]],
@@ -196,7 +212,7 @@ def test_render_route_has_no_tooltip_binding(cfg):
 def test_render_buffer_polygon_has_no_tooltip_binding(cfg):
     """Buffer polygons must not bind a Leaflet tooltip (BUG-01)."""
     state = new_game()
-    state.routes.append(RouteRecord(
+    _add_route_with_endpoints(state, RouteRecord(
         id="route_1", turn_index=0, player_id=1,
         from_poi_id="x", to_poi_id="y",
         coordinates_lonlat=[[121.5654, 25.0330], [121.5700, 25.0400]],
@@ -209,13 +225,13 @@ def test_render_buffer_polygon_has_no_tooltip_binding(cfg):
 
 def test_render_trump_route_styled_differently(cfg):
     state = new_game()
-    state.routes.append(RouteRecord(
+    _add_route_with_endpoints(state, RouteRecord(
         id="r_normal", turn_index=0, player_id=1,
         from_poi_id="x", to_poi_id="y",
         coordinates_lonlat=[[121.5, 25.0], [121.51, 25.01]],
         distance_m=10, duration_s=10, buffer_m=50,
     ))
-    state.routes.append(RouteRecord(
+    _add_route_with_endpoints(state, RouteRecord(
         id="r_trump", turn_index=1, player_id=2,
         from_poi_id="a", to_poi_id="b",
         coordinates_lonlat=[[121.5, 25.0], [121.52, 25.02]],
@@ -229,7 +245,7 @@ def test_render_trump_route_styled_differently(cfg):
 def test_render_skips_short_route_geometry(cfg):
     """A route with fewer than 2 coordinates should be skipped, not crash."""
     state = new_game()
-    state.routes.append(RouteRecord(
+    _add_route_with_endpoints(state, RouteRecord(
         id="r_bad", turn_index=0, player_id=1,
         from_poi_id="x", to_poi_id="y",
         coordinates_lonlat=[[121.5, 25.0]],  # only 1 point
@@ -450,7 +466,7 @@ def _route(rid="r1", *, buffer_m=50, player_id=1, coords=None):
     coords = coords or [[121.5654, 25.0330], [121.5700, 25.0400]]
     return RouteRecord(
         id=rid, turn_index=0, player_id=player_id,
-        from_poi_id="a", to_poi_id="b",
+        from_poi_id=f"{rid}_a", to_poi_id=f"{rid}_b",
         coordinates_lonlat=coords,
         distance_m=100.0, duration_s=80.0,
         buffer_m=buffer_m,
@@ -459,7 +475,7 @@ def _route(rid="r1", *, buffer_m=50, player_id=1, coords=None):
 
 def test_render_buffer_polygon_emitted_for_route(cfg):
     state = new_game()
-    state.routes.append(_route(buffer_m=50))
+    _add_route_with_endpoints(state, _route(buffer_m=50))
     html = render_map_html(state, cfg)
     # Folium Polygon renders as L.polygon(...) in JS
     assert "L.polygon(" in html
@@ -467,9 +483,9 @@ def test_render_buffer_polygon_emitted_for_route(cfg):
 
 def test_render_one_buffer_per_route(cfg):
     state = new_game()
-    state.routes.append(_route(rid="r1", buffer_m=50))
-    state.routes.append(_route(rid="r2", buffer_m=150, player_id=2,
-                               coords=[[121.5654, 25.0330], [121.5800, 25.0500]]))
+    _add_route_with_endpoints(state, _route(rid="r1", buffer_m=50))
+    _add_route_with_endpoints(state, _route(rid="r2", buffer_m=150, player_id=2,
+                              coords=[[121.5654, 25.0330], [121.5800, 25.0500]]))
     html = render_map_html(state, cfg)
     assert html.count("L.polygon(") == 2
 
@@ -484,7 +500,7 @@ def test_render_no_buffer_when_no_routes(cfg):
 def test_render_skips_buffer_for_short_route(cfg):
     """A 1-point route can't form a buffer; renderer must not crash."""
     state = new_game()
-    state.routes.append(RouteRecord(
+    _add_route_with_endpoints(state, RouteRecord(
         id="r_bad", turn_index=0, player_id=1,
         from_poi_id="x", to_poi_id="y",
         coordinates_lonlat=[[121.5, 25.0]],
@@ -496,7 +512,7 @@ def test_render_skips_buffer_for_short_route(cfg):
 
 def test_render_trump_buffer_uses_dash_array(cfg):
     state = new_game()
-    state.routes.append(_route(rid="r_trump", buffer_m=150))
+    _add_route_with_endpoints(state, _route(rid="r_trump", buffer_m=150))
     html = render_map_html(state, cfg)
     # The Polygon for a trump buffer must carry a dashArray option.
     # (folium emits it inside the polygon options object.)
@@ -506,14 +522,14 @@ def test_render_trump_buffer_uses_dash_array(cfg):
 def test_render_normal_buffer_solid(cfg):
     """A non-trump (50m) buffer should still draw, no dash mandate."""
     state = new_game()
-    state.routes.append(_route(rid="r_norm", buffer_m=50))
+    _add_route_with_endpoints(state, _route(rid="r_norm", buffer_m=50))
     html = render_map_html(state, cfg)
     assert "L.polygon(" in html
 
 
 def test_render_buffer_uses_player_color(cfg):
     state = new_game()
-    state.routes.append(_route(rid="r1", buffer_m=50, player_id=2))
+    _add_route_with_endpoints(state, _route(rid="r1", buffer_m=50, player_id=2))
     html = render_map_html(state, cfg)
     # Player 2 buffer should color with red (#ff3344)
     assert "ff3344" in html.lower()
@@ -532,7 +548,7 @@ def test_render_draws_buffers_before_markers(cfg):
         turn_index=0, player_id=1, placed_poi_id="anchor",
         used_trump=False, route_ids=[], flipped_poi_ids=[],
     ))
-    state.routes.append(_route(buffer_m=50))
+    _add_route_with_endpoints(state, _route(buffer_m=50))
 
     html = render_map_html(state, cfg)
     buffer_at = html.find("L.polygon(")
@@ -562,3 +578,70 @@ def test_render_does_not_mutate_state(cfg):
     assert state.pois[0].owner == pre_owner
     assert len(state.moves) == pre_moves
     assert len(state.pois) == pre_pois
+
+
+# ---------------------------------------------------------------------------
+# Stale routes: a route + its buffer must disappear once either endpoint
+# stops belonging to the player who drew it (flipped or gone neutral).
+# History in state.routes is preserved — only the render is filtered.
+# ---------------------------------------------------------------------------
+
+def _state_with_p1_route(*, from_owner=1, to_owner=1):
+    """A board with one P1 route between two POIs at given ownerships."""
+    state = new_game()
+    state.pois = [
+        _poi("anchor1", lat=25.0330, lon=121.5654, owner=from_owner),
+        _poi("anchor2", lat=25.0400, lon=121.5700, owner=to_owner),
+    ]
+    state.routes = [RouteRecord(
+        id="route_1", turn_index=0, player_id=1,
+        from_poi_id="anchor1", to_poi_id="anchor2",
+        coordinates_lonlat=[[121.5654, 25.0330], [121.5700, 25.0400]],
+        distance_m=100.0, duration_s=80.0, buffer_m=50,
+    )]
+    return state
+
+
+def test_render_shows_route_when_both_endpoints_owned(cfg):
+    """Both endpoints owned by P1 → route line and buffer are drawn."""
+    state = _state_with_p1_route()
+    html = render_map_html(state, cfg)
+    assert "L.polyline(" in html
+    assert "L.polygon(" in html
+
+
+def test_render_hides_route_when_endpoint_flipped_to_opponent(cfg):
+    """One endpoint flipped to P2 → route line and buffer both vanish."""
+    state = _state_with_p1_route(to_owner=2)
+    html = render_map_html(state, cfg)
+    assert "L.polyline(" not in html
+    assert "L.polygon(" not in html
+
+
+def test_render_hides_route_when_endpoint_goes_neutral(cfg):
+    """One endpoint back to neutral (None) → route line and buffer vanish."""
+    state = _state_with_p1_route(to_owner=None)
+    html = render_map_html(state, cfg)
+    assert "L.polyline(" not in html
+    assert "L.polygon(" not in html
+
+
+def test_render_hides_route_when_endpoint_missing(cfg):
+    """If an endpoint POI no longer exists, the route is not drawn."""
+    state = _state_with_p1_route()
+    state.pois = [p for p in state.pois if p.id != "anchor2"]
+    html = render_map_html(state, cfg)
+    assert "L.polyline(" not in html
+    assert "L.polygon(" not in html
+
+
+def test_render_does_not_mutate_state_routes(cfg):
+    """Filtering stale routes must not touch state.routes (history is kept)."""
+    state = _state_with_p1_route(to_owner=2)  # stale route — filtered out
+    before = [r.to_dict() for r in state.routes]
+
+    render_map_html(state, cfg)
+
+    after = [r.to_dict() for r in state.routes]
+    assert len(state.routes) == 1
+    assert after == before
