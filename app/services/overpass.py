@@ -13,6 +13,10 @@ from app.services.tls import build_ssl_context, is_certificate_verify_error
 class OverpassError(Exception):
     """Raised when an Overpass API call fails for any reason."""
 
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+
 
 # ---------------------------------------------------------------------------
 # Tag profile
@@ -54,7 +58,9 @@ _TAG_PROFILE: tuple[tuple[str, frozenset[str] | None], ...] = (
         ),
     ),
     ("railway", frozenset({"station", "halt"})),
-    ("public_transport", frozenset({"station", "stop_position", "platform"})),
+    # Only `station` is kept here — `stop_position` and `platform` flood
+    # dense areas with low-interest points that aren't fun to flag.
+    ("public_transport", frozenset({"station"})),
     ("historic", None),
 )
 
@@ -248,6 +254,16 @@ class OverpassClient:
             int(limit),
         )
 
+    @staticmethod
+    def _attempt_radii(radius_m: float) -> list[float]:
+        """Original radius plus up to two smaller fallbacks (e.g. 900 → 600 → 450)."""
+        radii: list[float] = [radius_m]
+        for factor in (2.0 / 3.0, 0.5):
+            smaller = radius_m * factor
+            if smaller >= 300.0 and smaller < radii[-1] - 50.0:
+                radii.append(smaller)
+        return radii
+
     def fetch_board_pois(
         self,
         center_lat: float,
@@ -260,11 +276,37 @@ class OverpassClient:
 
         Returns a de-duplicated list of Poi objects (owner=None).
         Raises OverpassError on any network / parse failure.
+
+        On transient failure (timeout, 5xx, network error) retries with
+        progressively smaller radii. Non-transient failures (HTTP 4xx, bad
+        payload, cert error) raise immediately.
         """
         key = self._cache_key(center_lat, center_lon, radius_m, limit)
         if key in self._cache:
             return self._cache[key]
 
+        last_error: OverpassError | None = None
+        for attempt_radius in self._attempt_radii(radius_m):
+            try:
+                pois = self._fetch_once(center_lat, center_lon, attempt_radius, limit)
+            except OverpassError as exc:
+                if not exc.transient:
+                    raise
+                last_error = exc
+                continue
+            self._cache[key] = pois
+            return pois
+
+        assert last_error is not None
+        raise last_error
+
+    def _fetch_once(
+        self,
+        center_lat: float,
+        center_lon: float,
+        radius_m: float,
+        limit: int,
+    ) -> list[Poi]:
         query = _build_query(center_lat, center_lon, radius_m, limit)
         url = f"{self._base_url}/api/interpreter"
 
@@ -278,21 +320,30 @@ class OverpassClient:
                 resp.raise_for_status()
                 payload: Any = resp.json()
         except httpx.TimeoutException as exc:
-            raise OverpassError("Overpass 服務暫時無法使用，請稍後再試") from exc
+            raise OverpassError(
+                "Overpass 服務暫時無法使用，請稍後再試", transient=True
+            ) from exc
         except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
             detail = _response_error_summary(exc.response)
-            message = f"Overpass HTTP error {exc.response.status_code}"
+            message = f"Overpass HTTP error {status}"
             if detail:
                 message = f"{message}: {detail}"
-            raise OverpassError(message) from exc
+            is_transient = status in (500, 502, 503, 504)
+            raise OverpassError(message, transient=is_transient) from exc
         except httpx.RequestError as exc:
             if is_certificate_verify_error(exc):
                 raise OverpassError(
-                    "SSL 憑證驗證失敗，請更新 certifi/truststore 或確認系統根憑證"
+                    "SSL 憑證驗證失敗，請更新 certifi/truststore 或確認系統根憑證",
+                    transient=False,
                 ) from exc
-            raise OverpassError(f"Overpass request error: {exc}") from exc
+            raise OverpassError(
+                f"Overpass request error: {exc}", transient=True
+            ) from exc
         except (ValueError, KeyError) as exc:
-            raise OverpassError(f"Overpass response parse error: {exc}") from exc
+            raise OverpassError(
+                f"Overpass response parse error: {exc}", transient=False
+            ) from exc
 
         if not isinstance(payload, dict):
             raise OverpassError("Overpass response is not a JSON object")
@@ -313,8 +364,12 @@ class OverpassClient:
                 continue
             seen_ids.add(poi.id)
             pois.append(poi)
-            if len(pois) >= limit:
-                break
 
-        self._cache[key] = pois
+        # Deterministic: higher-score POIs first (museum/park/historic before
+        # cafe), id ascending as a stable tiebreak. No randomness.
+        pois.sort(key=lambda p: (-p.score, p.id))
+
+        if len(pois) > limit:
+            pois = pois[:limit]
+
         return pois

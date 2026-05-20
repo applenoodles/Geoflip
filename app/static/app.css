@@ -170,6 +170,79 @@ h2 {
   padding: 4px 10px;
 }
 
+/* ---------- setup loading overlay ---------- */
+.setup-start-btn[disabled],
+.setup-start-btn[aria-busy="true"] {
+  cursor: progress;
+  opacity: 0.7;
+}
+.setup-loading-overlay[hidden] { display: none; }
+.setup-loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 20, 24, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.setup-loading-box {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 20px 28px;
+  text-align: center;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+  max-width: 320px;
+}
+.setup-loading-spinner {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 12px auto;
+  border: 3px solid #d8d8dc;
+  border-top-color: #1f77ff;
+  border-radius: 50%;
+  animation: setup-spin 0.9s linear infinite;
+}
+.setup-loading-text {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #222;
+}
+.setup-loading-hint {
+  margin: 6px 0 0 0;
+  font-size: 12px;
+  color: #666;
+}
+@keyframes setup-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- rules help (sidebar collapsible) ---------- */
+.rules-help {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed #ccc;
+}
+.rules-help summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #444;
+  padding: 2px 0;
+}
+.rules-help summary:hover { color: #1f77ff; }
+.rules-help details[open] summary { color: #1f77ff; }
+.rules-list {
+  margin: 8px 0 4px 18px;
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: #333;
+}
+.rules-list li { margin: 4px 0; }
+.rules-list strong { color: #111; }
+
 /* ---------- new game ---------- */
 .newgame {
   margin-top: 18px;

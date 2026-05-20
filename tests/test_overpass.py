@@ -146,6 +146,26 @@ def test_normalize_unsupported_category_returns_none():
     assert _normalize(elem) is None
 
 
+def test_normalize_public_transport_stop_position_returns_none():
+    """`public_transport=stop_position` is intentionally excluded (low-interest)."""
+    elem = _node(tags={"public_transport": "stop_position", "name": "Bus Stop"})
+    assert _normalize(elem) is None
+
+
+def test_normalize_public_transport_platform_returns_none():
+    """`public_transport=platform` is intentionally excluded (low-interest)."""
+    elem = _node(tags={"public_transport": "platform", "name": "Platform 3"})
+    assert _normalize(elem) is None
+
+
+def test_normalize_public_transport_station_kept():
+    """`public_transport=station` remains in the profile."""
+    poi = _normalize(_node(tags={"public_transport": "station", "name": "Bus Hub"}))
+    assert poi is not None
+    assert poi.category == "public_transport"
+    assert poi.poi_type == "station"
+
+
 def test_normalize_no_tags_returns_none():
     elem = {"type": "node", "id": 1, "lat": 0.0, "lon": 0.0}
     assert _normalize(elem) is None
@@ -291,6 +311,60 @@ def test_fetch_deduplicates_same_id(mocker):
     assert pois[0].name == "First"
 
 
+def test_fetch_filters_stop_position_and_platform(mocker):
+    """End-to-end: stop_position / platform elements never reach the board."""
+    _setup_mock_http(
+        mocker,
+        {
+            "elements": [
+                _node(id=10, tags={"public_transport": "stop_position", "name": "Stop"}),
+                _node(id=11, tags={"public_transport": "platform", "name": "Plat"}),
+                _node(id=12, tags={"public_transport": "station", "name": "Hub"}),
+                _node(id=13, tags={"amenity": "cafe", "name": "Cafe"}),
+            ]
+        },
+    )
+    pois = _make_client().fetch_board_pois(25.033, 121.565, 900)
+    names = sorted(p.name for p in pois)
+    assert names == ["Cafe", "Hub"]
+
+
+def test_fetch_prefers_higher_score_when_over_limit(mocker):
+    """When the response exceeds `limit`, higher-score POIs are kept first."""
+    _setup_mock_http(
+        mocker,
+        {
+            "elements": [
+                # Score 2 (cafe) — five of them.
+                _node(id=1, tags={"amenity": "cafe", "name": "Cafe 1"}),
+                _node(id=2, tags={"amenity": "cafe", "name": "Cafe 2"}),
+                _node(id=3, tags={"amenity": "cafe", "name": "Cafe 3"}),
+                _node(id=4, tags={"amenity": "cafe", "name": "Cafe 4"}),
+                _node(id=5, tags={"amenity": "cafe", "name": "Cafe 5"}),
+                # Score 3 (museum/park) — should win the limit race.
+                _node(id=6, tags={"tourism": "museum", "name": "Museum A"}),
+                _node(id=7, tags={"leisure": "park", "name": "Park A"}),
+            ]
+        },
+    )
+    pois = _make_client().fetch_board_pois(25.033, 121.565, 900, limit=2)
+    assert len(pois) == 2
+    assert {p.name for p in pois} == {"Museum A", "Park A"}
+
+
+def test_fetch_sort_is_deterministic(mocker):
+    """Same input → same output ordering (no randomness)."""
+    elements = [
+        _node(id=3, tags={"amenity": "cafe", "name": "C"}),
+        _node(id=1, tags={"tourism": "museum", "name": "M"}),
+        _node(id=2, tags={"leisure": "park", "name": "P"}),
+    ]
+    _setup_mock_http(mocker, {"elements": elements})
+    pois = _make_client().fetch_board_pois(25.033, 121.565, 900)
+    # museum/park (score 3) before cafe (score 2); museum id < park id.
+    assert [p.name for p in pois] == ["M", "P", "C"]
+
+
 def test_fetch_respects_limit(mocker):
     elements = [
         _node(id=i, tags={"amenity": "cafe", "name": f"Cafe {i}"})
@@ -433,6 +507,18 @@ def test_query_historic_requires_name_tag():
 def test_query_radius_is_rounded_integer():
     q = _build_query(25.0, 121.0, 899.6, 60)
     assert "around:900," in q
+
+
+def test_query_excludes_public_transport_stop_position_and_platform():
+    """The QL must not ask Overpass for stop_position / platform values."""
+    q = _build_query(25.0, 121.0, 800, 60)
+    # Locate the public_transport line and check its allowed alternation.
+    pt_lines = [line for line in q.splitlines() if '"public_transport"' in line]
+    assert pt_lines, "public_transport line missing from query"
+    joined = "\n".join(pt_lines)
+    assert "stop_position" not in joined
+    assert "platform" not in joined
+    assert "station" in joined
 
 
 def test_fetch_sends_query_to_interpreter_endpoint(mocker):

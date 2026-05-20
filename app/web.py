@@ -107,7 +107,8 @@ def create_app(
         # after wiping state. Gameplay POI search is gone — players click
         # neutral POIs on the map to place flags.
         if not state.pois:
-            return _render_setup()
+            preserved_q = (request.args.get("q") or "").strip()
+            return _render_setup(setup_query=preserved_q)
 
         current_player_id = state.current_player_id()
         anchor_count = len(state.anchor_pois(current_player_id))
@@ -211,14 +212,23 @@ def create_app(
 
     @app.post("/setup/start")
     def setup_start():
+        display_name = (request.form.get("display_name") or "").strip()
+        setup_query = (request.form.get("setup_query") or "").strip()
+        # On any failure, send the user back to setup with their search term
+        # preserved so they don't have to retype.
+        preserved_q = setup_query or display_name
+
+        def _back_to_setup():
+            if preserved_q:
+                return redirect(url_for("index", q=preserved_q))
+            return redirect(url_for("index"))
+
         try:
             lat = float(request.form.get("lat", ""))
             lon = float(request.form.get("lon", ""))
         except (TypeError, ValueError):
             flash("起始地點座標格式錯誤", "error")
-            return redirect(url_for("index"))
-
-        display_name = (request.form.get("display_name") or "").strip()
+            return _back_to_setup()
 
         radius_raw = (request.form.get("radius_m") or "").strip()
         try:
@@ -231,9 +241,14 @@ def create_app(
                 lat, lon, radius_m, limit=config.OVERPASS_MAX_POIS,
             )
         except OverpassError as exc:
+            # Log technical detail; never surface raw Overpass HTML/body to the player.
             logger.warning("overpass fetch failed at (%s,%s): %s", lat, lon, exc)
-            flash(f"地圖資料載入失敗：{exc}", "error")
-            return redirect(url_for("index"))
+            flash(
+                "地圖資料暫時無法載入，OpenStreetMap 伺服器忙碌中。"
+                "請稍後重試，或改搜尋其他地點。",
+                "error",
+            )
+            return _back_to_setup()
 
         if len(pois) < config.OVERPASS_MIN_POIS:
             logger.info(
@@ -245,7 +260,7 @@ def create_app(
                 f"{config.OVERPASS_MIN_POIS} 個），請換地點或調整範圍",
                 "error",
             )
-            return redirect(url_for("index"))
+            return _back_to_setup()
 
         # Commit: wipe any previous game and build a fresh board.
         state_store.reset()
