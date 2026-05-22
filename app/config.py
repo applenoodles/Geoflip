@@ -48,7 +48,7 @@ class Config:
 
     OSRM_BASE_URL: str = field(
         default_factory=lambda: _env_str(
-            "OSRM_BASE_URL", "https://router.project-osrm.org"
+            "OSRM_BASE_URL", "https://routing.openstreetmap.de/routed-foot"
         )
     )
     OSRM_PROFILE: str = field(
