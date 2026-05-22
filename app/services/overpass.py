@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import unescape
+import math
 import re
 from typing import Any
 
@@ -180,6 +181,29 @@ def _normalize(element: dict) -> Poi | None:
 
 
 # ---------------------------------------------------------------------------
+# Spatial spread filter
+# ---------------------------------------------------------------------------
+
+def _spread_filter(pois: list[Poi], min_spacing_m: float) -> list[Poi]:
+    """Keep only POIs that are ≥ min_spacing_m from every already-selected POI.
+
+    Iterates in the caller's order (score descending), so higher-value POIs
+    always win when two candidates are too close to each other.
+    Uses a flat-earth approximation — accurate enough within a 1 km radius.
+    """
+    selected: list[Poi] = []
+    for poi in pois:
+        for sel in selected:
+            dlat = (poi.lat - sel.lat) * 111_000
+            dlon = (poi.lon - sel.lon) * 111_000 * math.cos(math.radians(poi.lat))
+            if math.sqrt(dlat ** 2 + dlon ** 2) < min_spacing_m:
+                break
+        else:
+            selected.append(poi)
+    return selected
+
+
+# ---------------------------------------------------------------------------
 # Query builder
 # ---------------------------------------------------------------------------
 
@@ -237,9 +261,15 @@ class OverpassClient:
     using a curated tag profile that maps to existing game scoring.
     """
 
-    def __init__(self, base_url: str, timeout_seconds: float = 25.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        timeout_seconds: float = 25.0,
+        min_spacing_m: float = 80.0,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_seconds
+        self._min_spacing_m = min_spacing_m
         self._cache: dict[tuple[float, float, float, int], list[Poi]] = {}
         self._ssl_context = build_ssl_context()
 
@@ -368,6 +398,10 @@ class OverpassClient:
         # Deterministic: higher-score POIs first (museum/park/historic before
         # cafe), id ascending as a stable tiebreak. No randomness.
         pois.sort(key=lambda p: (-p.score, p.id))
+
+        # Drop POIs that are too close to a higher-scoring neighbour so the
+        # board stays spread out and no area gives a last-move sweep advantage.
+        pois = _spread_filter(pois, self._min_spacing_m)
 
         if len(pois) > limit:
             pois = pois[:limit]

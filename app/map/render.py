@@ -38,6 +38,12 @@ _PLAYER_FOLIUM_ICON_COLORS: dict[int, str] = {
     1: "blue",
     2: "red",
 }
+_SCORE_RADIUS: dict[int, int] = {1: 6, 2: 9, 3: 13}
+
+
+def _score_radius(score: int) -> int:
+    """Map POI score to CircleMarker radius so high-value spots are visually larger."""
+    return _SCORE_RADIUS.get(score, 7)
 
 
 def _owner_color(owner: int | None) -> str:
@@ -192,20 +198,31 @@ def render_map_html(state: GameState, config: Config) -> str:
         has_flag = owner is not None and poi.id in placed_id_sets.get(owner, set())
 
         if has_flag:
+            _color = _PLAYER_COLORS.get(owner, _NEUTRAL_COLOR)
+            _sz = 28
             folium.Marker(
                 location=[poi.lat, poi.lon],
                 popup=popup,
                 tooltip=escape(poi.name),
-                icon=folium.Icon(
-                    color=_PLAYER_FOLIUM_ICON_COLORS.get(owner, "gray"),
-                    icon="flag",
-                    prefix="fa",
+                icon=folium.DivIcon(
+                    html=(
+                        f'<div style="background:{_color};'
+                        f'border:2px solid rgba(255,255,255,0.9);'
+                        f'border-radius:50%;width:{_sz}px;height:{_sz}px;'
+                        f'display:flex;align-items:center;justify-content:center;'
+                        f'color:white;font-weight:bold;font-size:13px;'
+                        f'box-shadow:0 2px 5px rgba(0,0,0,0.4);">'
+                        f'&#9873;&thinsp;{poi.score}'
+                        f'</div>'
+                    ),
+                    icon_size=(_sz, _sz),
+                    icon_anchor=(_sz // 2, _sz // 2),
                 ),
             ).add_to(fmap)
         else:
             folium.CircleMarker(
                 location=[poi.lat, poi.lon],
-                radius=7,
+                radius=_score_radius(poi.score),
                 color=_owner_color(owner),
                 weight=2,
                 fill=True,

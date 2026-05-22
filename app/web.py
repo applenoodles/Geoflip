@@ -63,6 +63,7 @@ def create_app(
         overpass_client = OverpassClient(
             base_url=config.OVERPASS_BASE_URL,
             timeout_seconds=config.OVERPASS_TIMEOUT_SECONDS,
+            min_spacing_m=config.OVERPASS_MIN_SPACING_M,
         )
     if rules_engine is None:
         rules_engine = RulesEngine()

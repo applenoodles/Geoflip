@@ -72,6 +72,9 @@ class Config:
     OVERPASS_TIMEOUT_SECONDS: float = field(
         default_factory=lambda: _env_float("OVERPASS_TIMEOUT_SECONDS", "25")
     )
+    OVERPASS_MIN_SPACING_M: float = field(
+        default_factory=lambda: _env_float("OVERPASS_MIN_SPACING_M", "80")
+    )
 
     STATE_FILE: str = field(
         default_factory=lambda: _env_str("STATE_FILE", "data/state.json")
