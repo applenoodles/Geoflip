@@ -132,6 +132,19 @@ def create_app(
 
         map_iframe_src = f"/map?v={state.turn_index}_{len(state.moves)}"
 
+        # 每條路線走多遠、走多久 —— 常駐顯示在側邊欄（最新的在最上面）
+        routes_info = []
+        for r in reversed(state.routes):
+            mins, secs = divmod(int(r.duration_s), 60)
+            routes_info.append({
+                "turn": r.turn_index + 1,
+                "player": r.player_id,
+                "distance_m": int(r.distance_m),
+                "mins": mins,
+                "secs": secs,
+                "is_trump": r.buffer_m >= 150,
+            })
+
         return render_template(
             "index.html",
             state=state,
@@ -145,6 +158,7 @@ def create_app(
             total_flips=total_flips,
             total_routes=total_routes,
             trump_used=trump_used,
+            routes_info=routes_info,
             map_iframe_src=map_iframe_src,
         )
 
@@ -168,10 +182,20 @@ def create_app(
                 state.turn_index, state.current_player_id(),
                 poi_id, use_trump, flipped_n, len(result.route_ids),
             )
+            # Pull walking distance/time from the route just drawn (if any).
+            dist_info = ""
+            if result.route_ids:
+                route_id_set = set(result.route_ids)
+                new_routes = [r for r in result.state.routes if r.id in route_id_set]
+                if new_routes:
+                    r0 = new_routes[0]
+                    mins, secs = divmod(int(r0.duration_s), 60)
+                    dist_info = f"（步行 {int(r0.distance_m)} 公尺・{mins} 分 {secs} 秒）"
+
             if flipped_n:
-                flash(f"插旗成功，翻面 {flipped_n} 個 POI", "success")
+                flash(f"插旗成功{dist_info}，翻面 {flipped_n} 個 POI", "success")
             else:
-                flash("插旗成功", "success")
+                flash(f"插旗成功{dist_info}", "success")
         else:
             logger.info(
                 "move INVALID turn=%d player=%d poi=%s trump=%s reason=%s",

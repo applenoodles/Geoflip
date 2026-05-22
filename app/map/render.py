@@ -175,13 +175,16 @@ def render_map_html(state: GameState, config: Config) -> str:
 
         is_trump = route.buffer_m >= 150
         color = _PLAYER_COLORS.get(route.player_id, _NEUTRAL_COLOR)
+        mins, secs = divmod(int(route.duration_s), 60)
+        route_tooltip = f"{int(route.distance_m)} 公尺 · {mins} 分 {secs} 秒"
 
         folium.PolyLine(
             locations=latlon_path,
             color=color,
-            weight=5 if is_trump else 3,
+            weight=5 if is_trump else 4,
             opacity=0.85,
             dash_array="10,6" if is_trump else None,
+            tooltip=folium.Tooltip(route_tooltip, sticky=True),
         ).add_to(fmap)
 
     # ---- markers (z-top: drawn last so they sit above buffers + routes) ----

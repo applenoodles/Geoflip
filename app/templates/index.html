@@ -36,6 +36,22 @@
         {% endif %}
       {% endwith %}
 
+      {% if routes_info %}
+        <section class="routes-info">
+          <h2>路線紀錄（走多遠・走多久）</h2>
+          <ul class="routes-list">
+            {% for r in routes_info %}
+              <li>
+                第 {{ r.turn }} 手
+                <span class="badge player-{{ r.player }}">P{{ r.player }}</span>：
+                步行 <strong>{{ r.distance_m }} 公尺</strong>
+                （{{ r.mins }} 分 {{ r.secs }} 秒）{% if r.is_trump %} ★王牌{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+
       {% if is_finished %}
         <section class="summary">
           <h2>對局總結</h2>
