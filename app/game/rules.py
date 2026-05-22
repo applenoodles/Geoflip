@@ -88,6 +88,16 @@ class _CandidateRoute:
 class RulesEngine:
     """Pure game-rules engine — no I/O, no Flask, no Folium."""
 
+    def __init__(
+        self,
+        max_walk_duration_s: float = MAX_WALK_DURATION_S,
+        buffer_normal_m: float = BUFFER_NORMAL_M,
+        buffer_trump_m: float = BUFFER_TRUMP_M,
+    ) -> None:
+        self._max_walk_duration_s = max_walk_duration_s
+        self._buffer_normal_m = buffer_normal_m
+        self._buffer_trump_m = buffer_trump_m
+
     def apply_move(
         self,
         state: GameState,
@@ -147,8 +157,11 @@ class RulesEngine:
 
             # Take the shortest-duration successful route.
             best = min(successful, key=lambda c: c.route.duration_s)
-            if best.route.duration_s > MAX_WALK_DURATION_S:
-                return _invalid(state, "新旗必須在己方旗子步行 10 分鐘內")
+            if best.route.duration_s > self._max_walk_duration_s:
+                return _invalid(
+                    state,
+                    f"新旗必須在己方旗子步行 {int(self._max_walk_duration_s)} 秒內",
+                )
 
             chosen_route = best.route
             chosen_anchor_poi_id = best.anchor_poi_id
@@ -168,7 +181,7 @@ class RulesEngine:
 
         if chosen_route is not None:
             assert chosen_anchor_poi_id is not None
-            buffer_m = BUFFER_TRUMP_M if use_trump else BUFFER_NORMAL_M
+            buffer_m = self._buffer_trump_m if use_trump else self._buffer_normal_m
 
             # Project to meters using the new candidate as the reference point.
             to_m, _ = build_meter_transformers(

@@ -66,7 +66,11 @@ def create_app(
             min_spacing_m=config.OVERPASS_MIN_SPACING_M,
         )
     if rules_engine is None:
-        rules_engine = RulesEngine()
+        rules_engine = RulesEngine(
+            max_walk_duration_s=config.GAME_MAX_WALK_SECONDS,
+            buffer_normal_m=config.GAME_BUFFER_NORMAL_M,
+            buffer_trump_m=config.GAME_BUFFER_TRUMP_M,
+        )
 
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.secret_key = os.getenv("SECRET_KEY", "geoflip-dev-secret")

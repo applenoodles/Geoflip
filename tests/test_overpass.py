@@ -19,7 +19,9 @@ from app.services.overpass import (
 # ---------------------------------------------------------------------------
 
 def _make_client(**kwargs) -> OverpassClient:
-    defaults = dict(base_url="https://overpass.example.com", timeout_seconds=5.0)
+    # min_spacing_m=0 disables the spatial spread filter so tests can assert
+    # exact POI counts without worrying about coordinates being too close.
+    defaults = dict(base_url="https://overpass.example.com", timeout_seconds=5.0, min_spacing_m=0.0)
     defaults.update(kwargs)
     return OverpassClient(**defaults)
 

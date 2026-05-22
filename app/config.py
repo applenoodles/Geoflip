@@ -76,6 +76,16 @@ class Config:
         default_factory=lambda: _env_float("OVERPASS_MIN_SPACING_M", "80")
     )
 
+    GAME_MAX_WALK_SECONDS: float = field(
+        default_factory=lambda: _env_float("GAME_MAX_WALK_SECONDS", "600")
+    )
+    GAME_BUFFER_NORMAL_M: float = field(
+        default_factory=lambda: _env_float("GAME_BUFFER_NORMAL_M", "50")
+    )
+    GAME_BUFFER_TRUMP_M: float = field(
+        default_factory=lambda: _env_float("GAME_BUFFER_TRUMP_M", "150")
+    )
+
     STATE_FILE: str = field(
         default_factory=lambda: _env_str("STATE_FILE", "data/state.json")
     )
