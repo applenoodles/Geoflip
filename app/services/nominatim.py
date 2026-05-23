@@ -414,6 +414,7 @@ class NominatimClient:
             "addressdetails": 1,
             "dedupe": 1,
             "email": self._email,
+            "countrycodes": "tw",  # 只搜尋台灣的地點
         }
 
         try:

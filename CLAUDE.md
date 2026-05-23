@@ -5,6 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
+# Code Analysis (Use CodeGraph to understand structure/routes)
+./codegraph.bat query <symbol>    # Search for functions, classes, or routes
+./codegraph.bat affected <file>   # See what files are affected by changes to <file>
+./codegraph.bat context "<task>"  # Get task-specific structural summary
+./codegraph.bat status            # Check index statistics
+
 # Install (editable + dev deps)
 pip install -e ".[dev]"
 

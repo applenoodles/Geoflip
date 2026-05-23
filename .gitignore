@@ -146,6 +146,9 @@ cython_debug/
 # VS Code
 .vscode/
 
+# CodeGraph
+.codegraph/
+
 # Local GeoFlip runtime state and agent-only settings
 data/state.json
 app/data/
