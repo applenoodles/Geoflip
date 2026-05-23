@@ -18,8 +18,6 @@
         </p>
         <p>Player 1 分數：{{ scores[1] }}</p>
         <p>Player 2 分數：{{ scores[2] }}</p>
-        <p>P1 王牌：{{ "可用" if state.players[1].trump_available else "已用" }}</p>
-        <p>P2 王牌：{{ "可用" if state.players[2].trump_available else "已用" }}</p>
         <p>目前玩家 anchor 數：{{ current_player_anchor_count }}</p>
         {% if not is_finished %}
           <p class="hint">在地圖上點擊中立 POI 即可插旗。</p>
@@ -45,7 +43,7 @@
                 第 {{ r.turn }} 手
                 <span class="badge player-{{ r.player }}">P{{ r.player }}</span>：
                 步行 <strong>{{ r.distance_m }} 公尺</strong>
-                （{{ r.mins }} 分 {{ r.secs }} 秒）{% if r.is_trump %} ★王牌{% endif %}
+                （{{ r.mins }} 分 {{ r.secs }} 秒）
               </li>
             {% endfor %}
           </ul>
@@ -63,8 +61,6 @@
           <p>P2 擁有 POI：{{ owned_counts[2] }} 個</p>
           <p>總翻面次數：{{ total_flips }}</p>
           <p>總路線數：{{ total_routes }}</p>
-          <p>P1 王牌：{{ "已使用" if trump_used[1] else "未使用" }}</p>
-          <p>P2 王牌：{{ "已使用" if trump_used[2] else "未使用" }}</p>
         </section>
       {% endif %}
 
@@ -74,10 +70,10 @@
           <ol class="rules-list">
             <li>共 {{ state.max_turns }} 回合，兩位玩家在同一台機器上輪流插旗。</li>
             <li>插旗方式：直接點地圖上的中立 POI 即可選擇該地點。</li>
-            <li>當你還沒有任何 anchor（你親手插下、且尚未被對手翻走的 POI）時，可以自由落子，此時不能啟動王牌。</li>
-            <li>已經有 anchor 時，系統會從新落子點嘗試走到你「每一個」anchor，取其中<strong>步行時間最短</strong>的成功路線；若該最短路線超過 10 分鐘（600 秒），這一手無效，不會消耗回合或王牌。</li>
+            <li>當你還沒有任何 anchor（你親手插下、且尚未被對手翻走的 POI）時，可以自由落子。</li>
+            <li>已經有 anchor 時，系統會從新落子點嘗試走到你「每一個」anchor，取其中<strong>步行時間最短</strong>的成功路線；若該最短路線超過 {{ max_walk_seconds // 60 }} 分鐘（{{ max_walk_seconds }} 秒），這一手無效，不會消耗回合。</li>
             <li>只有這條最短路線會被畫到地圖上，其 buffer 內若有對手的 POI 會立刻翻面成為你的。翻面而來的 POI 不算 anchor，不能當作下一手的路線起點。</li>
-            <li>普通路線 buffer 為 50m；啟動王牌時 buffer 放大為 150m。每位玩家整局只能啟動王牌 1 次。</li>
+            <li>路線 buffer 為 {{ buffer_normal_m }}m。</li>
             <li>分數即時依目前 POI 擁有者計算。{{ state.max_turns }} 回合走完後，分數較高者獲勝，相同則平手。</li>
           </ol>
         </details>

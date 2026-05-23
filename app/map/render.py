@@ -17,7 +17,7 @@ from branca.element import MacroElement
 from jinja2 import Template
 
 from app.config import Config
-from app.models import GameState, Poi, RouteRecord
+from app.models import GameState, Poi, RouteRecord, mmss
 from app.services.geometry import (
     build_meter_transformers,
     buffer_route_meters,
@@ -82,7 +82,6 @@ def _build_popup_html(
     state: GameState,
     *,
     current_pid: int,
-    trump_eligible: bool,
     is_finished: bool,
 ) -> str:
     """Render a popup body for one POI.
@@ -92,11 +91,6 @@ def _build_popup_html(
     navigate the top frame so the player sees the redirected game page.
 
     Owned POIs (flipped or anchor) never get an insert button.
-
-    The trump checkbox is rendered only when `trump_eligible` is True —
-    i.e. when the current player has at least one anchor AND their trump
-    is still available. The /move handler ignores the field if the player
-    can't actually use it, but hiding it here matches the S5 spec.
     """
     owner_label = "中立" if poi.owner is None else f"Player {poi.owner}"
     is_anchor = False
@@ -112,18 +106,10 @@ def _build_popup_html(
     ]
 
     if poi.owner is None and not is_finished:
-        trump_box = ""
-        if trump_eligible:
-            trump_box = (
-                '<label style="display:block;margin-top:4px;font-size:12px;">'
-                '<input type="checkbox" name="use_trump" value="on"> 使用王牌'
-                '</label>'
-            )
         parts.append(
             '<form method="post" action="/move" target="_top" '
             'style="margin-top:8px;">'
             f'<input type="hidden" name="poi_id" value="{escape(poi.id)}">'
-            f'{trump_box}'
             f'<button type="submit">插旗為 Player {escape(str(current_pid))}</button>'
             '</form>'
         )
@@ -154,11 +140,6 @@ def render_map_html(state: GameState, config: Config) -> str:
     # ---- popup form context ----
     is_finished = state.is_finished()
     current_pid = state.current_player_id()
-    trump_eligible = (
-        not is_finished
-        and state.has_anchor_flag(current_pid)
-        and state.players[current_pid].trump_available
-    )
 
     # ---- only routes whose endpoints both still belong to the drawer ----
     active_routes = _active_routes(state)
@@ -173,17 +154,15 @@ def render_map_html(state: GameState, config: Config) -> str:
         if len(latlon_path) < 2:
             continue
 
-        is_trump = route.buffer_m >= 150
         color = _PLAYER_COLORS.get(route.player_id, _NEUTRAL_COLOR)
-        mins, secs = divmod(int(route.duration_s), 60)
+        mins, secs = mmss(route.duration_s)
         route_tooltip = f"{int(route.distance_m)} 公尺 · {mins} 分 {secs} 秒"
 
         folium.PolyLine(
             locations=latlon_path,
             color=color,
-            weight=5 if is_trump else 4,
+            weight=4,
             opacity=0.85,
-            dash_array="10,6" if is_trump else None,
             tooltip=folium.Tooltip(route_tooltip, sticky=True),
         ).add_to(fmap)
 
@@ -193,7 +172,6 @@ def render_map_html(state: GameState, config: Config) -> str:
             poi,
             state,
             current_pid=current_pid,
-            trump_eligible=trump_eligible,
             is_finished=is_finished,
         )
         popup = folium.Popup(popup_html, max_width=320)
@@ -315,7 +293,6 @@ def _render_route_buffers(fmap: folium.Map, routes: list[RouteRecord]) -> None:
         else:
             continue
 
-        is_trump = route.buffer_m >= 150
         color = _PLAYER_COLORS.get(route.player_id, _NEUTRAL_COLOR)
 
         for poly in polys:
@@ -333,7 +310,6 @@ def _render_route_buffers(fmap: folium.Map, routes: list[RouteRecord]) -> None:
                 fill=True,
                 fill_color=color,
                 fill_opacity=0.15,
-                dash_array="6,4" if is_trump else None,
             ).add_to(fmap)
 
 

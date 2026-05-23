@@ -3,7 +3,7 @@
 apply_move() is transaction-like:
   - All validation runs on the unchanged input state.
   - State mutation happens AFTER all checks pass, on a deepcopy.
-  - Invalid moves never change turn_index, owner, trump, routes, or moves.
+  - Invalid moves never change turn_index, owner, routes, or moves.
 
 Only the SHORTEST successful OSRM route (by duration_s) drives the buffer.
 Route endpoints come exclusively from anchor_pois() — never owned_pois().
@@ -38,7 +38,6 @@ from app.services.geometry import (
 
 MAX_WALK_DURATION_S: float = 600.0
 BUFFER_NORMAL_M: float = 50.0
-BUFFER_TRUMP_M: float = 150.0
 
 
 # ---------------------------------------------------------------------------
@@ -92,17 +91,14 @@ class RulesEngine:
         self,
         max_walk_duration_s: float = MAX_WALK_DURATION_S,
         buffer_normal_m: float = BUFFER_NORMAL_M,
-        buffer_trump_m: float = BUFFER_TRUMP_M,
     ) -> None:
         self._max_walk_duration_s = max_walk_duration_s
         self._buffer_normal_m = buffer_normal_m
-        self._buffer_trump_m = buffer_trump_m
 
     def apply_move(
         self,
         state: GameState,
         poi_id: str,
-        use_trump: bool,
         routing_service: RoutingService,
     ) -> MoveResult:
         # ---- Validation (no mutation) ----
@@ -111,16 +107,12 @@ class RulesEngine:
             return _invalid(state, "遊戲已結束")
 
         current_player_id = state.current_player_id()
-        player = state.players[current_player_id]
 
         candidate: Poi | None = state.get_poi(poi_id)
         if candidate is None:
             return _invalid(state, "POI 不存在")
         if candidate.owner is not None:
             return _invalid(state, "該地點已被擁有")
-
-        if use_trump and not player.trump_available:
-            return _invalid(state, "王牌已使用")
 
         # SNAPSHOT taken BEFORE any mutation. Excludes flipped POIs and
         # excludes own placed POIs that have since been flipped away by opponent.
@@ -130,10 +122,8 @@ class RulesEngine:
         chosen_anchor_poi_id: str | None = None
 
         if not old_anchor_pois:
-            # Branch A: no anchor → free place allowed, but trump forbidden.
-            if use_trump:
-                return _invalid(state, "沒有可放大的路線，無法使用王牌")
-            # chosen_route stays None
+            # Branch A: no anchor → free place allowed; chosen_route stays None.
+            pass
         else:
             # Branch B: have anchors → must reach at least one within 600 s.
             successful: list[_CandidateRoute] = []
@@ -171,7 +161,6 @@ class RulesEngine:
         new_state = deepcopy(state)
         new_candidate = new_state.get_poi(poi_id)
         assert new_candidate is not None  # validated above
-        new_player = new_state.players[current_player_id]
 
         new_candidate.owner = current_player_id
         new_candidate.placed_turn = state.turn_index
@@ -181,7 +170,7 @@ class RulesEngine:
 
         if chosen_route is not None:
             assert chosen_anchor_poi_id is not None
-            buffer_m = self._buffer_trump_m if use_trump else self._buffer_normal_m
+            buffer_m = self._buffer_normal_m
 
             # Project to meters using the new candidate as the reference point.
             to_m, _ = build_meter_transformers(
@@ -215,14 +204,10 @@ class RulesEngine:
             new_state.routes.append(route_record)
             route_ids.append(route_record.id)
 
-        if use_trump:
-            new_player.trump_available = False
-
         move_record = MoveRecord(
             turn_index=state.turn_index,
             player_id=current_player_id,
             placed_poi_id=new_candidate.id,
-            used_trump=use_trump,
             route_ids=list(route_ids),
             flipped_poi_ids=list(flipped_poi_ids),
         )

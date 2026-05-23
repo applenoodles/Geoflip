@@ -118,7 +118,7 @@ def test_render_placed_flag_uses_marker_not_circle(cfg):
     state.pois = [_poi("p1", owner=1)]
     state.moves.append(MoveRecord(
         turn_index=0, player_id=1, placed_poi_id="p1",
-        used_trump=False, route_ids=[], flipped_poi_ids=[],
+        route_ids=[], flipped_poi_ids=[],
     ))
     html = render_map_html(state, cfg)
     # folium.Marker generates "L.marker(" in JS
@@ -221,25 +221,6 @@ def test_render_buffer_polygon_has_no_tooltip_binding(cfg):
     html = render_map_html(state, cfg)
     assert "buffer · 50m" not in html
     assert "Player 1 buffer" not in html
-
-
-def test_render_trump_route_styled_differently(cfg):
-    state = new_game()
-    _add_route_with_endpoints(state, RouteRecord(
-        id="r_normal", turn_index=0, player_id=1,
-        from_poi_id="x", to_poi_id="y",
-        coordinates_lonlat=[[121.5, 25.0], [121.51, 25.01]],
-        distance_m=10, duration_s=10, buffer_m=50,
-    ))
-    _add_route_with_endpoints(state, RouteRecord(
-        id="r_trump", turn_index=1, player_id=2,
-        from_poi_id="a", to_poi_id="b",
-        coordinates_lonlat=[[121.5, 25.0], [121.52, 25.02]],
-        distance_m=20, duration_s=20, buffer_m=150,
-    ))
-    html = render_map_html(state, cfg)
-    # Trump uses dashArray — look for "dash" in the JS options
-    assert "dash" in html.lower()
 
 
 def test_render_skips_short_route_geometry(cfg):
@@ -351,11 +332,10 @@ def test_render_empty_board_guards_restore_with_storage(cfg):
 # Popup forms (S5: neutral popups have inline /move form; owned do not)
 # ---------------------------------------------------------------------------
 
-def _popup(poi, state, *, current_pid=1, trump_eligible=False, is_finished=False):
+def _popup(poi, state, *, current_pid=1, is_finished=False):
     return _build_popup_html(
         poi, state,
         current_pid=current_pid,
-        trump_eligible=trump_eligible,
         is_finished=is_finished,
     )
 
@@ -371,28 +351,12 @@ def test_popup_neutral_has_move_form_targeting_top():
     assert 'value="p1"' in html
 
 
-def test_popup_neutral_does_not_show_trump_when_ineligible():
-    state = new_game()
-    poi = _poi("p1")
-    html = _popup(poi, state, trump_eligible=False)
-    assert 'name="use_trump"' not in html
-    assert "使用王牌" not in html
-
-
-def test_popup_neutral_shows_trump_when_eligible():
-    state = new_game()
-    poi = _poi("p1")
-    html = _popup(poi, state, trump_eligible=True)
-    assert 'name="use_trump"' in html
-    assert "使用王牌" in html
-
-
 def test_popup_owned_has_no_form():
     """Owned POIs (flipped or anchor) must never offer an insert button."""
     state = new_game()
     poi = _poi("owned", owner=1)
     state.pois = [poi]
-    html = _popup(poi, state, current_pid=2, trump_eligible=True)
+    html = _popup(poi, state, current_pid=2)
     assert "<form" not in html
     assert "/move" not in html
     assert "插旗" not in html
@@ -416,46 +380,6 @@ def test_popup_escapes_poi_id_in_form_value():
     html = _popup(poi, state)
     assert '<script>alert(1)</script>' not in html
     assert "&lt;script&gt;" in html
-
-
-# ---------------------------------------------------------------------------
-# Trump-checkbox gating wired through render_map_html (uses state to derive)
-# ---------------------------------------------------------------------------
-
-def test_render_no_trump_checkbox_when_player_has_no_anchor(cfg):
-    """Trump available but no anchor → checkbox hidden in popups."""
-    state = new_game()
-    # P1's turn (turn_index=0), P1 has trump but no placed flag.
-    state.pois = [_poi("p1")]
-    html = render_map_html(state, cfg)
-    assert "使用王牌" not in html
-
-
-def test_render_no_trump_checkbox_when_trump_unavailable(cfg):
-    """Player has anchor but already spent trump → checkbox hidden."""
-    state = new_game()
-    state.pois = [_poi("anchor", owner=1), _poi("target", lat=25.05, lon=121.57)]
-    state.moves.append(MoveRecord(
-        turn_index=0, player_id=1, placed_poi_id="anchor",
-        used_trump=False, route_ids=[], flipped_poi_ids=[],
-    ))
-    state.players[1].trump_available = False
-    state.turn_index = 2  # back to P1's turn
-    html = render_map_html(state, cfg)
-    assert "使用王牌" not in html
-
-
-def test_render_trump_checkbox_when_anchor_and_trump_available(cfg):
-    state = new_game()
-    state.pois = [_poi("anchor", owner=1), _poi("target", lat=25.05, lon=121.57)]
-    state.moves.append(MoveRecord(
-        turn_index=0, player_id=1, placed_poi_id="anchor",
-        used_trump=False, route_ids=[], flipped_poi_ids=[],
-    ))
-    state.turn_index = 2
-    html = render_map_html(state, cfg)
-    # JS-escaped form attribute survives inside Folium's popup string literal.
-    assert "使用王牌" in html
 
 
 # ---------------------------------------------------------------------------
@@ -510,17 +434,8 @@ def test_render_skips_buffer_for_short_route(cfg):
     assert "L.polygon(" not in html
 
 
-def test_render_trump_buffer_uses_dash_array(cfg):
-    state = new_game()
-    _add_route_with_endpoints(state, _route(rid="r_trump", buffer_m=150))
-    html = render_map_html(state, cfg)
-    # The Polygon for a trump buffer must carry a dashArray option.
-    # (folium emits it inside the polygon options object.)
-    assert "dashArray" in html
-
-
 def test_render_normal_buffer_solid(cfg):
-    """A non-trump (50m) buffer should still draw, no dash mandate."""
+    """A 50m buffer should still draw, no dash mandate."""
     state = new_game()
     _add_route_with_endpoints(state, _route(rid="r_norm", buffer_m=50))
     html = render_map_html(state, cfg)
@@ -546,7 +461,7 @@ def test_render_draws_buffers_before_markers(cfg):
     state.pois = [_poi("anchor", owner=1), _poi("target", lat=25.05, lon=121.57)]
     state.moves.append(MoveRecord(
         turn_index=0, player_id=1, placed_poi_id="anchor",
-        used_trump=False, route_ids=[], flipped_poi_ids=[],
+        route_ids=[], flipped_poi_ids=[],
     ))
     _add_route_with_endpoints(state, _route(buffer_m=50))
 
@@ -565,7 +480,7 @@ def test_render_does_not_mutate_state(cfg):
     state.pois = [_poi("p1", owner=1)]
     state.moves.append(MoveRecord(
         turn_index=0, player_id=1, placed_poi_id="p1",
-        used_trump=False, route_ids=[], flipped_poi_ids=[],
+        route_ids=[], flipped_poi_ids=[],
     ))
     pre_turn = state.turn_index
     pre_owner = state.pois[0].owner

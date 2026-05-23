@@ -23,8 +23,7 @@ class Config:
     # 改完記得：① 重啟 server　② 開新局（舊棋盤的路線是存檔的，不會變）
     #
     #   GAME_MAX_WALK_SECONDS  : 新旗要在己方旗子步行幾秒內才能連（越小越難）
-    #   GAME_BUFFER_NORMAL_M   : 普通走廊寬度（公尺）
-    #   GAME_BUFFER_TRUMP_M    : 王牌走廊寬度（公尺）
+    #   GAME_BUFFER_NORMAL_M   : 路線走廊寬度（公尺）
     #   OVERPASS_MIN_SPACING_M : POI 之間最小間距（避免擠成一坨）
     #   OVERPASS_RADIUS_M      : 抓 POI 的半徑（公尺）
     #   OSRM_BASE_URL          : 路由服務（routed-foot=步行；router.project-osrm=車程）
@@ -88,13 +87,10 @@ class Config:
     )
 
     GAME_MAX_WALK_SECONDS: float = field(
-        default_factory=lambda: _env_float("GAME_MAX_WALK_SECONDS", "1800")
+        default_factory=lambda: _env_float("GAME_MAX_WALK_SECONDS", "600")
     )
     GAME_BUFFER_NORMAL_M: float = field(
         default_factory=lambda: _env_float("GAME_BUFFER_NORMAL_M", "50")
-    )
-    GAME_BUFFER_TRUMP_M: float = field(
-        default_factory=lambda: _env_float("GAME_BUFFER_TRUMP_M", "150")
     )
 
     STATE_FILE: str = field(

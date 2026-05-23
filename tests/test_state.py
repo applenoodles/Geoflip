@@ -60,12 +60,6 @@ def test_new_game_turn_index_zero():
     assert state.turn_index == 0
 
 
-def test_new_game_both_players_trump():
-    state = new_game()
-    assert state.players[1].trump_available is True
-    assert state.players[2].trump_available is True
-
-
 # ---------------------------------------------------------------------------
 # StateStore — load
 # ---------------------------------------------------------------------------

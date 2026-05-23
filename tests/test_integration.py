@@ -72,7 +72,7 @@ def test_full_game_flow_without_network(state_with_fpois, by_id):
     book = by_id["node:1003"]      # (180, -20)
 
     # P1 first flag: free
-    r1 = engine.apply_move(state, hub.id, False, FakeOsrm())
+    r1 = engine.apply_move(state, hub.id, FakeOsrm())
     assert r1.ok
     state = r1.state
     assert state.get_poi(hub.id).owner == 1
@@ -80,7 +80,7 @@ def test_full_game_flow_without_network(state_with_fpois, by_id):
     assert state.routes == []  # no route on first flag
 
     # P2 first flag: free (no anchor)
-    r2 = engine.apply_move(state, corner.id, False, FakeOsrm())
+    r2 = engine.apply_move(state, corner.id, FakeOsrm())
     assert r2.ok
     state = r2.state
     assert state.get_poi(corner.id).owner == 2
@@ -90,7 +90,7 @@ def test_full_game_flow_without_network(state_with_fpois, by_id):
     # corner@(60,0) which lies exactly on the line.
     osrm = FakeOsrm()
     osrm.register(book, hub, duration_s=180.0)
-    r3 = engine.apply_move(state, book.id, False, osrm)
+    r3 = engine.apply_move(state, book.id, osrm)
     assert r3.ok, r3.message
     state = r3.state
 
@@ -99,89 +99,6 @@ def test_full_game_flow_without_network(state_with_fpois, by_id):
     assert corner.id in r3.flipped_poi_ids
     assert len(state.routes) == 1  # exactly one route per valid move
     assert state.scores()[1] >= state.scores()[2]
-
-
-# ---------------------------------------------------------------------------
-# Trump 150m flips farther POIs and consumes the trump
-# ---------------------------------------------------------------------------
-
-def test_trump_flow(state_with_fpois, by_id):
-    state = state_with_fpois
-    engine = RulesEngine()
-
-    hub = by_id["node:1000"]      # (0, 0)
-    museum = by_id["node:1005"]   # (320, 120) — owned by P2, 120m off the line
-    book = by_id["node:1003"]     # (180, -20)
-    far_p2 = by_id["node:1009"]   # far away
-
-    # P1 first
-    state = engine.apply_move(state, hub.id, False, FakeOsrm()).state
-    # P2 first - museum at (320, 120) - far enough not to be flipped by 50m buffer
-    state = engine.apply_move(state, museum.id, False, FakeOsrm()).state
-    assert state.get_poi(museum.id).owner == 2
-
-    # P1 second WITHOUT trump - book route hub→book, 50m buffer should NOT
-    # reach museum 120m north of line. So no flip.
-    osrm = FakeOsrm()
-    osrm.register(book, hub, duration_s=160.0)
-    r3 = engine.apply_move(state, book.id, False, osrm)
-    assert r3.ok
-    state = r3.state
-    # Museum still P2's (too far for 50m buffer)
-    assert state.get_poi(museum.id).owner == 2
-
-    # P2 places far_p2 (free placement — P2 has no anchor anymore? museum still
-    # anchor since P2 placed AND owns). So P2 needs a route.
-    osrm_p2 = FakeOsrm()
-    osrm_p2.register(far_p2, museum, duration_s=99999.0)  # too far → invalid
-    r_invalid = engine.apply_move(state, far_p2.id, False, osrm_p2)
-    assert r_invalid.ok is False  # >600s
-    # turn didn't advance. Now place an extra POI close to museum.
-    near_museum = _make_extra_poi("near_mus", east_m=350.0)  # arbitrary
-    state.pois.append(near_museum)
-    osrm_p2b = FakeOsrm()
-    osrm_p2b.register(near_museum, museum, duration_s=200.0)
-    state = engine.apply_move(state, near_museum.id, False, osrm_p2b).state
-    assert state.turn_index == 4
-
-    # P1's turn again. Now place an extra POI and use TRUMP so the 150m buffer
-    # reaches the museum.
-    # Make extra at east=320 (near museum's east coord) so route hub@(0,0) →
-    # extra@(320,0) passes 120m south of museum@(320,120) — within 150m trump.
-    extra = _make_extra_poi("trump_target", east_m=320.0)
-    state.pois.append(extra)
-
-    pre_trump_p1 = state.players[1].trump_available
-    assert pre_trump_p1 is True
-
-    osrm_t = FakeOsrm()
-    osrm_t.register(extra, hub, duration_s=320.0)
-    # Also need book→extra in case engine chooses book as anchor (both are P1 anchors)
-    osrm_t.register(extra, book, duration_s=140.0)  # shorter, so engine picks book→extra
-
-    r_trump = engine.apply_move(state, extra.id, use_trump=True, routing_service=osrm_t)
-    assert r_trump.ok, r_trump.message
-    state = r_trump.state
-
-    # The route used should be the shortest one (book→extra @ 140s)
-    used_route = state.routes[-1]
-    assert used_route.buffer_m == 150
-    # Trump consumed
-    assert state.players[1].trump_available is False
-
-    # Try to use trump again — invalid (no consumption)
-    extra2 = _make_extra_poi("trump_target_2", east_m=325.0)
-    state.pois.append(extra2)
-    # Skip P2's turn properly: just verify trump-already-used path
-    state.turn_index = 8  # force back to P1's turn (even index)
-    osrm2 = FakeOsrm()
-    osrm2.register(extra2, hub, duration_s=325.0)
-    osrm2.register(extra2, book, duration_s=145.0)
-    osrm2.register(extra2, extra, duration_s=20.0)
-    r_again = engine.apply_move(state, extra2.id, use_trump=True, routing_service=osrm2)
-    assert r_again.ok is False
-    assert "王牌" in r_again.message
-    assert state.players[1].trump_available is False  # still false
 
 
 # ---------------------------------------------------------------------------
@@ -197,27 +114,25 @@ def test_invalid_move_transaction(state_with_fpois, by_id):
     target = by_id["node:1007"]  # 700m east
 
     # P1 first
-    state = engine.apply_move(state, hub.id, False, FakeOsrm()).state
+    state = engine.apply_move(state, hub.id, FakeOsrm()).state
     # P2 first (far)
-    state = engine.apply_move(state, far_p2.id, False, FakeOsrm()).state
+    state = engine.apply_move(state, far_p2.id, FakeOsrm()).state
 
     # Snapshot
     pre_turn = state.turn_index
     pre_owners = {p.id: p.owner for p in state.pois}
-    pre_trump1 = state.players[1].trump_available
     pre_routes = len(state.routes)
     pre_moves = len(state.moves)
 
-    # P1 tries with trump, but route > 600s → invalid
+    # P1 tries a placement, but route > 600s → invalid
     osrm = FakeOsrm()
     osrm.register(target, hub, duration_s=900.0)
-    res = engine.apply_move(state, target.id, use_trump=True, routing_service=osrm)
+    res = engine.apply_move(state, target.id, routing_service=osrm)
     assert res.ok is False
 
     # NOTHING should have changed in the original state
     assert state.turn_index == pre_turn
     assert {p.id: p.owner for p in state.pois} == pre_owners
-    assert state.players[1].trump_available == pre_trump1
     assert len(state.routes) == pre_routes
     assert len(state.moves) == pre_moves
 
@@ -236,17 +151,17 @@ def test_route_failure_partial_success(state_with_fpois, by_id):
     p2_far = by_id["node:1009"]
     p2_far2 = by_id["node:1008"]
 
-    state = engine.apply_move(state, hub.id, False, FakeOsrm()).state            # P1 turn 0
-    state = engine.apply_move(state, p2_far.id, False, FakeOsrm()).state         # P2 turn 1
+    state = engine.apply_move(state, hub.id, FakeOsrm()).state            # P1 turn 0
+    state = engine.apply_move(state, p2_far.id, FakeOsrm()).state         # P2 turn 1
 
     osrm = FakeOsrm()
     osrm.register(book, hub, duration_s=160.0)
-    state = engine.apply_move(state, book.id, False, osrm).state                 # P1 turn 2
+    state = engine.apply_move(state, book.id, osrm).state                 # P1 turn 2
 
     # P2 places far2 with a valid route to far
     osrm_p2 = FakeOsrm()
     osrm_p2.register(p2_far2, p2_far, duration_s=300.0)
-    state = engine.apply_move(state, p2_far2.id, False, osrm_p2).state           # P2 turn 3
+    state = engine.apply_move(state, p2_far2.id, osrm_p2).state           # P2 turn 3
 
     # Now P1 places target. Routes:
     #   target → hub:  FAILS (OSRM unreachable)
@@ -255,7 +170,7 @@ def test_route_failure_partial_success(state_with_fpois, by_id):
     osrm3.register_failure(target, hub, RuntimeError("osrm down"))
     osrm3.register(target, book, duration_s=250.0)
     pre_routes = len(state.routes)
-    res = engine.apply_move(state, target.id, False, osrm3)
+    res = engine.apply_move(state, target.id, osrm3)
     assert res.ok, res.message
     state = res.state
 
@@ -274,20 +189,20 @@ def test_route_all_failed(state_with_fpois, by_id):
     p2_far = by_id["node:1009"]
     p2_far2 = by_id["node:1008"]
 
-    state = engine.apply_move(state, hub.id, False, FakeOsrm()).state
-    state = engine.apply_move(state, p2_far.id, False, FakeOsrm()).state
+    state = engine.apply_move(state, hub.id, FakeOsrm()).state
+    state = engine.apply_move(state, p2_far.id, FakeOsrm()).state
     osrm = FakeOsrm()
     osrm.register(book, hub, duration_s=160.0)
-    state = engine.apply_move(state, book.id, False, osrm).state
+    state = engine.apply_move(state, book.id, osrm).state
     osrm_p2 = FakeOsrm()
     osrm_p2.register(p2_far2, p2_far, duration_s=300.0)
-    state = engine.apply_move(state, p2_far2.id, False, osrm_p2).state
+    state = engine.apply_move(state, p2_far2.id, osrm_p2).state
 
     osrm3 = FakeOsrm()
     osrm3.register_failure(target, hub, RuntimeError("a"))
     osrm3.register_failure(target, book, RuntimeError("b"))
     pre_turn = state.turn_index
-    res = engine.apply_move(state, target.id, False, osrm3)
+    res = engine.apply_move(state, target.id, osrm3)
     assert res.ok is False
     assert "步行路線" in res.message
     assert state.turn_index == pre_turn
@@ -313,7 +228,7 @@ def test_finished_after_12_valid_moves():
         osrm = FakeOsrm()
         for a in anchors:
             osrm.register(target, a, duration_s=50.0)  # always quick
-        res = engine.apply_move(state, target.id, False, osrm)
+        res = engine.apply_move(state, target.id, osrm)
         assert res.ok, f"move {i} failed: {res.message}"
         state = res.state
 
@@ -326,41 +241,9 @@ def test_finished_after_12_valid_moves():
     extra = _make_extra_poi("extra", east_m=2000)
     state.pois.append(extra)
     osrm = FakeOsrm()
-    res = engine.apply_move(state, extra.id, False, osrm)
+    res = engine.apply_move(state, extra.id, osrm)
     assert res.ok is False
     assert "結束" in res.message
-
-
-# ---------------------------------------------------------------------------
-# Flipped-only player cannot use trump
-# ---------------------------------------------------------------------------
-
-def test_only_flipped_pois_cannot_use_trump(state_with_fpois, by_id):
-    state = state_with_fpois
-    engine = RulesEngine()
-
-    hub = by_id["node:1000"]      # P1 anchor
-    corner = by_id["node:1001"]   # P2 first flag (will be flipped to P1)
-    book = by_id["node:1003"]     # P1 second flag — flips corner
-
-    state = engine.apply_move(state, hub.id, False, FakeOsrm()).state
-    state = engine.apply_move(state, corner.id, False, FakeOsrm()).state
-
-    osrm = FakeOsrm()
-    osrm.register(book, hub, duration_s=180.0)
-    state = engine.apply_move(state, book.id, False, osrm).state
-
-    # corner is now owned by P1 via flip. P2's anchor count must be 0.
-    assert state.get_poi(corner.id).owner == 1
-    assert state.has_anchor_flag(2) is False
-    # P2 owns no POIs at all now; but they had a placed flag that got flipped.
-    # Either way, no anchor → trump must be invalid.
-    target = by_id["node:1009"]
-    osrm_p2 = FakeOsrm()
-    res = engine.apply_move(state, target.id, use_trump=True, routing_service=osrm_p2)
-    assert res.ok is False
-    assert "王牌" in res.message
-    assert state.players[2].trump_available is True  # not consumed
 
 
 # ---------------------------------------------------------------------------
@@ -377,21 +260,21 @@ def test_flipped_poi_not_used_as_anchor(state_with_fpois, by_id):
     target = by_id["node:1009"]    # far candidate
     p2_far = by_id["node:1008"]
 
-    state = engine.apply_move(state, hub.id, False, FakeOsrm()).state
-    state = engine.apply_move(state, corner.id, False, FakeOsrm()).state
+    state = engine.apply_move(state, hub.id, FakeOsrm()).state
+    state = engine.apply_move(state, corner.id, FakeOsrm()).state
     o = FakeOsrm()
     o.register(book, hub, duration_s=180.0)
-    state = engine.apply_move(state, book.id, False, o).state  # flips corner to P1
+    state = engine.apply_move(state, book.id, o).state  # flips corner to P1
 
     # P2's free placement (no anchor since corner was flipped away)
-    state = engine.apply_move(state, p2_far.id, False, FakeOsrm()).state
+    state = engine.apply_move(state, p2_far.id, FakeOsrm()).state
 
     # Now P1 tries to place far target. P1 owns {hub, book, corner(flipped)}.
     # Anchors should be {hub, book} only — corner must NOT be queried.
     osrm = FakeOsrm()
     osrm.register_failure(target, hub, RuntimeError("a"))
     osrm.register_failure(target, book, RuntimeError("b"))
-    res = engine.apply_move(state, target.id, False, osrm)
+    res = engine.apply_move(state, target.id, osrm)
     assert res.ok is False
     # Critical: no route call for corner (the flipped POI).
     corner_targets = {(round(t[2], 6), round(t[3], 6)) for t in osrm.calls}

@@ -49,7 +49,6 @@ def _make_move(player_id, placed_poi_id, turn_index=0) -> MoveRecord:
         turn_index=turn_index,
         player_id=player_id,
         placed_poi_id=placed_poi_id,
-        used_trump=False,
         route_ids=[],
         flipped_poi_ids=[],
     )
@@ -73,12 +72,6 @@ def test_new_game_status_active():
     state = new_game()
     assert state.status == "active"
     assert not state.is_finished()
-
-
-def test_new_game_trump_available():
-    state = new_game()
-    assert state.players[1].trump_available is True
-    assert state.players[2].trump_available is True
 
 
 def test_new_game_12_max_turns():
@@ -435,7 +428,6 @@ def test_gamestate_serialization_roundtrip():
     assert len(restored.pois) == 2
     assert restored.pois[0].owner == 1
     assert len(restored.moves) == 1
-    assert restored.players[1].trump_available is True
 
 
 def test_from_dict_bad_status_raises():
