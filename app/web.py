@@ -18,6 +18,7 @@ from flask import (
 from app.config import Config
 from app.game.rules import RulesEngine
 from app.map.render import render_map_html
+from app.models import mmss
 from app.services.nominatim import NominatimClient, NominatimError
 from app.services.osrm import OsrmClient
 from app.services.overpass import OverpassClient, OverpassError
@@ -69,7 +70,6 @@ def create_app(
         rules_engine = RulesEngine(
             max_walk_duration_s=config.GAME_MAX_WALK_SECONDS,
             buffer_normal_m=config.GAME_BUFFER_NORMAL_M,
-            buffer_trump_m=config.GAME_BUFFER_TRUMP_M,
         )
 
     app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -125,24 +125,18 @@ def create_app(
         }
         total_flips = sum(len(m.flipped_poi_ids) for m in state.moves)
         total_routes = len(state.routes)
-        trump_used = {
-            1: any(m.used_trump for m in state.moves if m.player_id == 1),
-            2: any(m.used_trump for m in state.moves if m.player_id == 2),
-        }
-
         map_iframe_src = f"/map?v={state.turn_index}_{len(state.moves)}"
 
         # 每條路線走多遠、走多久 —— 常駐顯示在側邊欄（最新的在最上面）
         routes_info = []
         for r in reversed(state.routes):
-            mins, secs = divmod(int(r.duration_s), 60)
+            mins, secs = mmss(r.duration_s)
             routes_info.append({
                 "turn": r.turn_index + 1,
                 "player": r.player_id,
                 "distance_m": int(r.distance_m),
                 "mins": mins,
                 "secs": secs,
-                "is_trump": r.buffer_m >= 150,
             })
 
         return render_template(
@@ -157,40 +151,37 @@ def create_app(
             owned_counts=owned_counts,
             total_flips=total_flips,
             total_routes=total_routes,
-            trump_used=trump_used,
             routes_info=routes_info,
+            max_walk_seconds=int(config.GAME_MAX_WALK_SECONDS),
+            buffer_normal_m=int(config.GAME_BUFFER_NORMAL_M),
             map_iframe_src=map_iframe_src,
         )
 
     @app.post("/move")
     def move():
         poi_id = (request.form.get("poi_id") or "").strip()
-        use_trump = request.form.get("use_trump") == "on"
 
         if not poi_id:
             flash("缺少 poi_id", "error")
             return redirect(url_for("index"))
 
         state = state_store.load()
-        result = rules_engine.apply_move(state, poi_id, use_trump, osrm_client)
+        result = rules_engine.apply_move(state, poi_id, osrm_client)
 
         if result.ok:
             state_store.save(result.state)
             flipped_n = len(result.flipped_poi_ids)
             logger.info(
-                "move ok turn=%d player=%d poi=%s trump=%s flipped=%d routes=%d",
+                "move ok turn=%d player=%d poi=%s flipped=%d routes=%d",
                 state.turn_index, state.current_player_id(),
-                poi_id, use_trump, flipped_n, len(result.route_ids),
+                poi_id, flipped_n, len(result.route_ids),
             )
             # Pull walking distance/time from the route just drawn (if any).
             dist_info = ""
-            if result.route_ids:
-                route_id_set = set(result.route_ids)
-                new_routes = [r for r in result.state.routes if r.id in route_id_set]
-                if new_routes:
-                    r0 = new_routes[0]
-                    mins, secs = divmod(int(r0.duration_s), 60)
-                    dist_info = f"（步行 {int(r0.distance_m)} 公尺・{mins} 分 {secs} 秒）"
+            if result.route_ids and result.state.routes:
+                r0 = result.state.routes[-1]
+                mins, secs = mmss(r0.duration_s)
+                dist_info = f"（步行 {int(r0.distance_m)} 公尺 · {mins} 分 {secs} 秒）"
 
             if flipped_n:
                 flash(f"插旗成功{dist_info}，翻面 {flipped_n} 個 POI", "success")
@@ -198,9 +189,9 @@ def create_app(
                 flash(f"插旗成功{dist_info}", "success")
         else:
             logger.info(
-                "move INVALID turn=%d player=%d poi=%s trump=%s reason=%s",
+                "move INVALID turn=%d player=%d poi=%s reason=%s",
                 state.turn_index, state.current_player_id(),
-                poi_id, use_trump, result.message,
+                poi_id, result.message,
             )
             flash(result.message, "error")
             # IMPORTANT: do NOT save — keep the on-disk state untouched.

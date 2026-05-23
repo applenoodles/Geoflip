@@ -7,7 +7,7 @@ via Nominatim; the server then uses Overpass to build a board of nearby POIs.
 During the match players no longer search — they click visible POIs on the map.
 After 12 turns the player with the higher total POI score wins; an end-of-game
 summary in the sidebar shows winner, scores, owned-POI counts, total flips,
-total routes, and trump usage.
+and total routes.
 
 This is a local single-machine game — no accounts, no database, no online
 multiplayer. State is persisted to a single JSON file.
@@ -25,14 +25,12 @@ multiplayer. State is persisted to a single JSON file.
 5. From the second flag onward, the new flag must be reachable by **OSRM walking
    route ≤ 600 s** from at least one of the player's existing **anchor flags**.
 6. If a player has zero anchor flags (e.g. all were flipped away), the next
-   placement is free again — but **trump is forbidden** without an anchor.
+   placement is free again.
 7. On a valid placement the engine takes the **shortest successful route** to
-   any anchor, buffers it (**50 m normal, 150 m trump**), and **flips all
-   opponent-owned POIs inside the buffer** to the current player.
-8. Each player has **one trump card** they may use once successfully.
-9. Invalid moves are a complete no-op: no turn advance, no trump consumed, no
-   owner change.
-10. Score is computed live from current POI ownership — never cached.
+   any anchor, buffers it (**50 m**), and **flips all opponent-owned POIs inside
+   the buffer** to the current player.
+8. Invalid moves are a complete no-op: no turn advance, no owner change.
+9. Score is computed live from current POI ownership — never cached.
 
 A POI gained via flipping is **owned but not an anchor** — only POIs the player
 actively placed and still owns are valid route endpoints.
@@ -124,12 +122,8 @@ All tests run fully offline — Nominatim/OSRM HTTP calls are mocked.
    appears on the map
 10. Try a POI > 600 s walk away and confirm the placement is rejected with
     an error flash
-11. Use **trump** (checkbox inside the popup) on a long-ish route and verify a
-    wider buffer flips more opponent POIs (and that trump is greyed out
-    afterwards)
-12. Play until the game finishes and verify the sidebar end-summary shows
-    winner, scores, owned-POI counts, total flips, total routes, and trump
-    usage
+11. Play until the game finishes and verify the sidebar end-summary shows
+    winner, scores, owned-POI counts, total flips, and total routes
 
 ---
 

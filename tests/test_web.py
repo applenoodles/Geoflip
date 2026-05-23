@@ -379,26 +379,25 @@ def test_api_state_fresh_when_no_file(client, deps):
 
 
 # ---------------------------------------------------------------------------
-# Trump UI gating — flipped-only player must not get trump option
+# Sidebar must not contain the flag-placement form (it lives in map popups)
 # ---------------------------------------------------------------------------
 
-def test_sidebar_has_no_flag_form_or_trump_checkbox(client, deps):
-    """Trump and flag UI live in map popups now, never in the sidebar HTML."""
+def test_sidebar_has_no_flag_form(client, deps):
+    """Flag UI lives in map popups now, never in the sidebar HTML."""
     state = new_game()
     state.pois = [_make_poi("anchor", owner=1), _make_poi("other", lat=25.05, lon=121.57)]
     from app.models import MoveRecord
     state.moves.append(MoveRecord(
         turn_index=0, player_id=1, placed_poi_id="anchor",
-        used_trump=False, route_ids=[], flipped_poi_ids=[],
+        route_ids=[], flipped_poi_ids=[],
     ))
     state.turn_index = 2
     deps["state_store"].save(state)
 
     resp = client.get("/")
     assert resp.status_code == 200
-    # No sidebar flag-placement form, no trump checkbox in the sidebar HTML.
+    # No sidebar flag-placement form in the sidebar HTML.
     assert b'name="poi_id"' not in resp.data
-    assert "使用王牌".encode("utf-8") not in resp.data
 
 
 # ---------------------------------------------------------------------------
@@ -633,7 +632,7 @@ def test_new_game_redirects_and_landing_page_is_setup(client, deps):
 def _finished_state_with_history():
     """Build a finished GameState with a known mix of moves/routes/flips.
 
-    P1 placed two flags (one with trump), flipping 3 of P2's POIs.
+    P1 placed two flags, flipping 3 of P2's POIs.
     P2 placed one flag, no flips. Two RouteRecords on the board.
     """
     from app.models import MoveRecord, RouteRecord
@@ -652,15 +651,15 @@ def _finished_state_with_history():
     state.moves = [
         MoveRecord(
             turn_index=0, player_id=1, placed_poi_id="p1_anchor",
-            used_trump=False, route_ids=[], flipped_poi_ids=[],
+            route_ids=[], flipped_poi_ids=[],
         ),
         MoveRecord(
             turn_index=1, player_id=2, placed_poi_id="p2_anchor",
-            used_trump=False, route_ids=["r1"], flipped_poi_ids=[],
+            route_ids=["r1"], flipped_poi_ids=[],
         ),
         MoveRecord(
             turn_index=2, player_id=1, placed_poi_id="p1_grabbed",
-            used_trump=True, route_ids=["r2"],
+            route_ids=["r2"],
             flipped_poi_ids=["f1", "f2", "f3"],
         ),
     ]
@@ -678,7 +677,6 @@ def _finished_state_with_history():
             distance_m=80.0, duration_s=90.0, buffer_m=150.0,
         ),
     ]
-    state.players[1].trump_available = False  # P1 spent trump
     state.status = "finished"
     return state
 
@@ -708,7 +706,7 @@ def test_summary_shows_winner_and_scores_when_finished(client, deps):
     assert "最終分數".encode("utf-8") in body
 
 
-def test_summary_shows_owned_counts_flips_routes_and_trump(client, deps):
+def test_summary_shows_owned_counts_flips_and_routes(client, deps):
     state = _finished_state_with_history()
     deps["state_store"].save(state)
 
@@ -721,9 +719,6 @@ def test_summary_shows_owned_counts_flips_routes_and_trump(client, deps):
     assert "總翻面次數：3".encode("utf-8") in body
     # Total routes = 2
     assert "總路線數：2".encode("utf-8") in body
-    # Trump usage — P1 used, P2 did not
-    assert "P1 王牌：已使用".encode("utf-8") in body
-    assert "P2 王牌：未使用".encode("utf-8") in body
 
 
 def test_summary_shows_tie_when_scores_equal(client, deps):
@@ -736,9 +731,9 @@ def test_summary_shows_tie_when_scores_equal(client, deps):
     ]
     state.moves = [
         MoveRecord(turn_index=0, player_id=1, placed_poi_id="a",
-                   used_trump=False, route_ids=[], flipped_poi_ids=[]),
+                   route_ids=[], flipped_poi_ids=[]),
         MoveRecord(turn_index=1, player_id=2, placed_poi_id="b",
-                   used_trump=False, route_ids=[], flipped_poi_ids=[]),
+                   route_ids=[], flipped_poi_ids=[]),
     ]
     state.status = "finished"
     deps["state_store"].save(state)

@@ -53,6 +53,11 @@ def score_poi(category: str, poi_type: str) -> int:
     return 1
 
 
+def mmss(duration_s: float) -> tuple[int, int]:
+    """Split a duration in seconds into (minutes, seconds)."""
+    return divmod(int(duration_s), 60)
+
+
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
@@ -113,13 +118,11 @@ class Poi:
 class PlayerState:
     id: PlayerId
     name: str
-    trump_available: bool
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "name": self.name,
-            "trump_available": self.trump_available,
         }
 
     @classmethod
@@ -127,7 +130,6 @@ class PlayerState:
         return cls(
             id=d["id"],
             name=d["name"],
-            trump_available=bool(d["trump_available"]),
         )
 
 
@@ -176,7 +178,6 @@ class MoveRecord:
     turn_index: int
     player_id: PlayerId
     placed_poi_id: str
-    used_trump: bool
     route_ids: list[str]
     flipped_poi_ids: list[str]
 
@@ -185,7 +186,6 @@ class MoveRecord:
             "turn_index": self.turn_index,
             "player_id": self.player_id,
             "placed_poi_id": self.placed_poi_id,
-            "used_trump": self.used_trump,
             "route_ids": list(self.route_ids),
             "flipped_poi_ids": list(self.flipped_poi_ids),
         }
@@ -196,7 +196,6 @@ class MoveRecord:
             turn_index=int(d["turn_index"]),
             player_id=d["player_id"],
             placed_poi_id=d["placed_poi_id"],
-            used_trump=bool(d["used_trump"]),
             route_ids=list(d["route_ids"]),
             flipped_poi_ids=list(d["flipped_poi_ids"]),
         )

@@ -20,8 +20,8 @@ def new_game() -> GameState:
         turn_index=0,
         max_turns=12,
         players={
-            1: PlayerState(id=1, name="Player 1", trump_available=True),
-            2: PlayerState(id=2, name="Player 2", trump_available=True),
+            1: PlayerState(id=1, name="Player 1"),
+            2: PlayerState(id=2, name="Player 2"),
         },
         pois=[],
         routes=[],
